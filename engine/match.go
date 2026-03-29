@@ -29,6 +29,8 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 		result = book.MatchOrderWithAmount(takerOrder)
 	} else if !takerOrder.AvailableTotal.Equal(Zero) {
 		result = book.MatchOrderWithTotal(takerOrder)
+	} else {
+		result = &MatchResult{MatchedOrders: []*models.MatchedOrder{}}
 	}
 
 	switch takerOrder.Type {
@@ -79,21 +81,6 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 				book.log.Error("book", "UpdateOrder: %v", err)
 			}
 			response.InitialOrder = takerOrder
-		}
-		if !result.IsDone && result.AmountLeft.Equal(Zero) {
-			orderUpdate := &models.OrderUpdate{
-				ID:              takerOrder.ID,
-				Status:          models.OrderStatusOpen,
-				AvailableAmount: result.AmountLeft,
-				ExecutedAmount:  result.AmountDone,
-				CanceledAmount:  Zero,
-				ExecutedTotal:   result.TotalDone,
-			}
-			takerOrder.ApplyUpdate(orderUpdate)
-			err = book.InsertOrder(takerOrder)
-			if err != nil {
-				book.log.Error("book", "InsertOrder: %v", err)
-			}
 		}
 		if result.IsDone {
 			orderUpdate := &models.OrderUpdate{
