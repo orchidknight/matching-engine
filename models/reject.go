@@ -7,4 +7,5 @@ const (
 	RejectReasonNotEnoughLiquidity = "Not enough liquidity"
 	RejectReasonNoMatches          = "Order got zero matches"
 	RejectReasonWrongSymbol        = "Order has wrong symbol"
+	RejectReasonWrongInput         = "Order has wrong original values"
 )

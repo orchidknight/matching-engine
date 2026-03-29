@@ -17,6 +17,7 @@ type MatchResult struct {
 	TotalLeft  decimal.Decimal `json:"totalLeft"`
 	TotalDone  decimal.Decimal `json:"totalDone"`
 	AmountDone decimal.Decimal `json:"amountDone"`
+	Error      error           `json:"error"`
 }
 
 func (mr *MatchResult) String() string {
