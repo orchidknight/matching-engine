@@ -41,7 +41,7 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 				book.log.Error("book", "Reject: %v", err)
 			}
 
-			response.InitialOrder = &models.TakerOrderResult{Order: takerOrder}
+			response.InitialOrder = takerOrder
 
 			return response
 		}
@@ -78,7 +78,7 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 			if err != nil {
 				book.log.Error("book", "UpdateOrder: %v", err)
 			}
-			response.InitialOrder = &models.TakerOrderResult{Order: takerOrder}
+			response.InitialOrder = takerOrder
 		}
 		if !result.IsDone && result.AmountLeft.Equal(Zero) {
 			orderUpdate := &models.OrderUpdate{
@@ -127,7 +127,6 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 				ID:           fmt.Sprintf("%d_%d", takerOrder.ID, matchedOrder.Order.ID),
 				TakerID:      takerOrder.Account,
 				MakerID:      matchedOrder.Order.Account,
-				Status:       models.TradeStatusExecuted,
 				Symbol:       takerOrder.Symbol,
 				TakerOrderID: takerOrder.ID,
 				MakerOrderID: matchedOrder.Order.ID,
@@ -153,7 +152,7 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 				book.log.Error("book", "UpdateOrder: %v", err)
 			}
 
-			response.MatchedOrders = append(response.MatchedOrders, &models.MakerOrderResult{
+			response.MatchedOrders = append(response.MatchedOrders, &models.MatchedOrderResult{
 				Order: matchedOrder.Order,
 				Trade: trade,
 			})
@@ -178,7 +177,6 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 				ID:           fmt.Sprintf("%d_%d", takerOrder.ID, matchedOrder.Order.ID),
 				TakerID:      takerOrder.Account,
 				MakerID:      matchedOrder.Order.Account,
-				Status:       models.TradeStatusExecuted,
 				Symbol:       takerOrder.Symbol,
 				TakerOrderID: takerOrder.ID,
 				MakerOrderID: matchedOrder.Order.ID,
@@ -196,7 +194,7 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 				book.log.Error("book", "UpdateOrder: %v", err)
 			}
 
-			response.MatchedOrders = append(response.MatchedOrders, &models.MakerOrderResult{
+			response.MatchedOrders = append(response.MatchedOrders, &models.MatchedOrderResult{
 				Order: matchedOrder.Order,
 				Trade: trade,
 			})
@@ -226,7 +224,7 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 			book.log.Error("orders", "UpdateOrder: %v", err)
 		}
 
-		response.InitialOrder = &models.TakerOrderResult{Order: takerOrder}
+		response.InitialOrder = takerOrder
 
 		market, _ := book.markets.GetMarketByID(book.market.String())
 		if market != nil {
