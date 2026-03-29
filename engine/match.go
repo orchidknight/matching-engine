@@ -30,7 +30,28 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 	} else if !takerOrder.AvailableTotal.Equal(Zero) {
 		result = book.MatchOrderWithTotal(takerOrder)
 	} else {
-		result = &MatchResult{MatchedOrders: []*models.MatchedOrder{}}
+		result = &MatchResult{
+			Order:         nil,
+			MatchedOrders: []*models.MatchedOrder{},
+			IsDone:        false,
+			AmountDone:    Zero,
+			AmountLeft:    Zero,
+			TotalDone:     Zero,
+			TotalLeft:     Zero,
+			Error:         fmt.Errorf("wrong input"),
+		}
+	}
+
+	if result.Error != nil {
+		takerOrder.Reject(models.RejectReasonWrongInput)
+		err = book.orders.Reject(ctx, takerOrder)
+		if err != nil {
+			book.log.Error("book", "Reject: %v", err)
+		}
+
+		response.InitialOrder = takerOrder
+
+		return response
 	}
 
 	switch takerOrder.Type {
