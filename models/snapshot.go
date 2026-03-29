@@ -5,7 +5,7 @@ import (
 )
 
 type Snapshot struct {
-	Symbol Symbol               `json:"s"`
-	Bids   [][2]decimal.Decimal `json:"b"`
-	Asks   [][2]decimal.Decimal `json:"a"`
+	Symbol Symbol               `json:"symbol"`
+	Bids   [][2]decimal.Decimal `json:"bids"`
+	Asks   [][2]decimal.Decimal `json:"asks"`
 }
