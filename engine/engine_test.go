@@ -27,7 +27,6 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 				Type:           models.OrderTypeMarket,
 				Status:         models.OrderStatusNew,
 				Side:           models.Buy,
-				Total:          decimal.NewFromUint64(1000),
 				AvailableTotal: decimal.NewFromUint64(1000),
 			},
 			wantOrderResponse: &models.OrderResponse{
@@ -39,7 +38,6 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 					Status:         models.OrderStatusRejected,
 					RejectedReason: models.RejectReasonWrongSymbol,
 					Side:           models.Buy,
-					Total:          decimal.NewFromUint64(1000),
 					AvailableTotal: decimal.NewFromUint64(1000),
 				},
 			},
@@ -52,7 +50,6 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 				Type:            models.OrderTypeLimit,
 				Status:          models.OrderStatusNew,
 				Side:            models.Buy,
-				Amount:          decimal.NewFromUint64(1),
 				AvailableAmount: decimal.NewFromUint64(1),
 				Price:           decimal.NewFromUint64(100000),
 			},
@@ -64,7 +61,6 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 					Type:            models.OrderTypeLimit,
 					Status:          models.OrderStatusOpen,
 					Side:            models.Buy,
-					Amount:          decimal.NewFromUint64(1),
 					AvailableAmount: decimal.NewFromUint64(1),
 					Price:           decimal.NewFromUint64(100000),
 				},
@@ -78,7 +74,6 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 				Type:            models.OrderTypeStopLimit,
 				Status:          models.OrderStatusNew,
 				Side:            models.Buy,
-				Amount:          decimal.NewFromUint64(1),
 				AvailableAmount: decimal.NewFromUint64(1),
 				Price:           decimal.NewFromUint64(100000),
 				ActivationPrice: decimal.NewFromUint64(90000),
@@ -91,7 +86,6 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 					Type:            models.OrderTypeStopLimit,
 					Status:          models.OrderStatusPendingTriggerPrice,
 					Side:            models.Buy,
-					Amount:          decimal.NewFromUint64(1),
 					AvailableAmount: decimal.NewFromUint64(1),
 					Price:           decimal.NewFromUint64(100000),
 					ActivationPrice: decimal.NewFromUint64(90000),
@@ -107,7 +101,6 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 				Type:           models.OrderTypeMarket,
 				Status:         models.OrderStatusNew,
 				Side:           models.Buy,
-				Total:          decimal.NewFromUint64(100000),
 				AvailableTotal: decimal.NewFromUint64(100000),
 			},
 			wantOrderResponse: &models.OrderResponse{
@@ -120,7 +113,6 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 					Status:         models.OrderStatusRejected,
 					RejectedReason: models.RejectReasonNoMatches,
 					Side:           models.Buy,
-					Total:          decimal.NewFromUint64(100000),
 					AvailableTotal: decimal.NewFromUint64(100000),
 				},
 			},
@@ -356,9 +348,6 @@ func cmpOrder(path string, a, b *models.Order) error {
 	}
 
 	// decimals
-	if err := cmpDecimal(path+".Amount", a.Amount, b.Amount); err != nil {
-		return err
-	}
 	if err := cmpDecimal(path+".AvailableAmount", a.AvailableAmount, b.AvailableAmount); err != nil {
 		return err
 	}
@@ -369,9 +358,6 @@ func cmpOrder(path string, a, b *models.Order) error {
 		return err
 	}
 
-	if err := cmpDecimal(path+".Total", a.Total, b.Total); err != nil {
-		return err
-	}
 	if err := cmpDecimal(path+".AvailableTotal", a.AvailableTotal, b.AvailableTotal); err != nil {
 		return err
 	}

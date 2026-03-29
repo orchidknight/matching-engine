@@ -79,7 +79,7 @@ func (book *Orderbook) InsertOrder(order *models.Order) error {
 		}
 	}
 
-	book.log.Debug("book", "Inserted: %d P:%s A:%s", order.ID, order.Price.String(), order.Amount.String())
+	book.log.Debug("book", "Inserted: %d P:%s A:%s", order.ID, order.Price.String(), order.AvailableAmount.String())
 
 	return nil
 }

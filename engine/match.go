@@ -119,7 +119,7 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 				ID:              matchedOrder.Order.ID,
 				Status:          models.OrderStatusCompleted,
 				AvailableAmount: Zero,
-				ExecutedAmount:  matchedOrder.Order.Amount,
+				ExecutedAmount:  matchedOrder.Order.AvailableAmount,
 				CanceledAmount:  Zero,
 				ExecutedTotal:   matchedOrder.MatchedAmount.Mul(matchedOrder.Order.Price),
 			}

@@ -84,7 +84,6 @@ type Order struct {
 	ExecutedAmount  decimal.Decimal `json:"executedAmount"`
 	CanceledAmount  decimal.Decimal `json:"canceledAmount"`
 
-	Total          decimal.Decimal `json:"total"`
 	AvailableTotal decimal.Decimal `json:"availableTotal"`
 	ExecutedTotal  decimal.Decimal `json:"executedTotal"`
 	CanceledTotal  decimal.Decimal `json:"canceledTotal"`
@@ -130,12 +129,15 @@ type MatchedOrderResult struct {
 }
 
 func (or *OrderResponse) String() string {
+	if or.InitialOrder == nil {
+		return "empty order response"
+	}
 	var matchedOrders []string
 	for _, mo := range or.MatchedOrders {
-		matchedOrders = append(matchedOrders, fmt.Sprintf("< %d %s %v %v >", mo.Order.ID, mo.Order.Side, mo.Order.Price, mo.Order.Amount))
+		matchedOrders = append(matchedOrders, fmt.Sprintf("< %s %s %v %v >", mo.Order.ID.String(), mo.Order.Side, mo.Order.Price, mo.Order.AvailableAmount))
 	}
 
-	return fmt.Sprintf("%s Initial: %s %s %v %v Matched: %v", or.InitialOrder.Symbol, or.InitialOrder.ID.String(), or.InitialOrder.Side, or.InitialOrder.Price, or.InitialOrder.Amount, matchedOrders)
+	return fmt.Sprintf("%s Initial: %s %s %v %v Matched: %v", or.InitialOrder.Symbol, or.InitialOrder.ID.String(), or.InitialOrder.Side, or.InitialOrder.Price, or.InitialOrder.AvailableAmount, matchedOrders)
 }
 
 type OrderUpdate struct {
@@ -246,7 +248,6 @@ func NewOrder(r NewOrderRequest) (*Order, error) {
 		Type:            orderType,
 		Side:            orderSide,
 		Status:          OrderStatusNew,
-		Amount:          decimal.NewFromFloat(r.Amount),
 		AvailableAmount: decimal.NewFromFloat(r.Amount),
 		Price:           decimal.NewFromFloat(r.Price),
 		ExecutedTotal:   decimal.NewFromFloat(r.Size),
