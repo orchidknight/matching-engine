@@ -53,7 +53,7 @@ func (mh *MarketHandler) Run(ctx context.Context) error {
 		case o := <-mh.incomingOrders:
 			err := mh.ProcessOrder(ctx, o)
 			if err != nil {
-				mh.logger.Error("engine", "Cant process %d : %v", o.ID, err)
+				mh.logger.Error("engine", "Cant process %s : %v", o.ID.String(), err)
 			}
 		}
 	}
@@ -129,7 +129,7 @@ func (mh *MarketHandler) processCancel(ctx context.Context, o *models.Order) err
 		InitialOrder: order,
 	}
 
-	mh.logger.Debug("engine", "Canceled: %d", order.ID)
+	mh.logger.Debug("engine", "Canceled: %s", order.ID.String())
 
 	return nil
 }
@@ -245,7 +245,7 @@ func (mh *MarketHandler) processToMatch(ctx context.Context, order *models.Order
 		mh.logger.Error("orders", "Reject: %v", err)
 	}
 
-	mh.logger.Debug("engine", "Order <%d> has been rejected, not enough liquidity", order.ID)
+	mh.logger.Debug("engine", "Order <%s> has been rejected, not enough liquidity", order.ID.String())
 
 	return nil
 }
