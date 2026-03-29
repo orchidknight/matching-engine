@@ -50,6 +50,8 @@ func (mh *MarketHandler) Run(ctx context.Context) error {
 	mh.logger.Debug("engine", "Market handler %s running...", mh.id)
 	defer mh.once.Do(func() { close(mh.done) })
 
+	go mh.stopListener.Run(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
