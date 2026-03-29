@@ -7,7 +7,7 @@ import (
 
 type Symbol string
 
-var assetSeparator = "-"
+const assetSeparator = "-"
 
 func (s Symbol) String() string {
 	return string(s)

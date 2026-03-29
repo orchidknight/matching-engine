@@ -2,9 +2,9 @@ package models
 
 import (
 	"fmt"
-	"github.com/google/uuid"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
 
@@ -83,8 +83,11 @@ type Order struct {
 	AvailableAmount decimal.Decimal `json:"availableAmount"`
 	ExecutedAmount  decimal.Decimal `json:"executedAmount"`
 	CanceledAmount  decimal.Decimal `json:"canceledAmount"`
-	AvailableTotal  decimal.Decimal `json:"availableTotal"`
-	ExecutedTotal   decimal.Decimal `json:"executedTotal"`
+
+	Total          decimal.Decimal `json:"total"`
+	AvailableTotal decimal.Decimal `json:"availableTotal"`
+	ExecutedTotal  decimal.Decimal `json:"executedTotal"`
+	CanceledTotal  decimal.Decimal `json:"canceledTotal"`
 
 	Price           decimal.Decimal `json:"price"`
 	ActivationPrice decimal.Decimal `json:"stopLimitPrice"`
@@ -94,10 +97,6 @@ type Order struct {
 	LastTrade *Trade
 
 	CreatedAt time.Time `json:"createdAt"`
-}
-
-func (o *Order) Total() decimal.Decimal {
-	return o.AvailableAmount.Mul(o.Price)
 }
 
 func (o *Order) TotalExecuted() decimal.Decimal {
@@ -115,10 +114,19 @@ type MatchedOrder struct {
 }
 
 type OrderResponse struct {
-	Symbol        Symbol              `json:"pair"`
-	InitialOrder  *TakerOrderResult   `json:"initial_order"`
-	MatchedOrders []*MakerOrderResult `json:"matched_orders"`
-	LastPrice     *decimal.Decimal    `json:"last_price"`
+	Symbol        Symbol                `json:"pair"`
+	InitialOrder  *Order                `json:"initial_order"`
+	MatchedOrders []*MatchedOrderResult `json:"matched_orders"`
+	LastPrice     *decimal.Decimal      `json:"last_price"`
+}
+
+type TakerOrderResult struct {
+	Order *Order `json:"order"`
+}
+
+type MatchedOrderResult struct {
+	Order *Order `json:"order"`
+	Trade *Trade `json:"trade"`
 }
 
 func (or *OrderResponse) String() string {
@@ -127,29 +135,21 @@ func (or *OrderResponse) String() string {
 		matchedOrders = append(matchedOrders, fmt.Sprintf("< %d %s %v %v >", mo.Order.ID, mo.Order.Side, mo.Order.Price, mo.Order.Amount))
 	}
 
-	return fmt.Sprintf("%s Taker: %d %s %v %v Makers: %v", or.InitialOrder.Order.Symbol, or.InitialOrder.Order.ID, or.InitialOrder.Order.Side, or.InitialOrder.Order.Price, or.InitialOrder.Order.Amount, matchedOrders)
-}
-
-type TakerOrderResult struct {
-	Order *Order `json:"order"`
-}
-
-type MakerOrderResult struct {
-	Order *Order `json:"order"`
-	Trade *Trade `json:"trade"`
+	return fmt.Sprintf("%s Initial: %s %s %v %v Matched: %v", or.InitialOrder.Symbol, or.InitialOrder.ID.String(), or.InitialOrder.Side, or.InitialOrder.Price, or.InitialOrder.Amount, matchedOrders)
 }
 
 type OrderUpdate struct {
-	ID              uuid.UUID
-	Status          OrderStatus
+	ID             uuid.UUID
+	Status         OrderStatus
+	ActivationType ActivationType
+
 	AvgPrice        decimal.Decimal
 	AvailableAmount decimal.Decimal
 	ExecutedAmount  decimal.Decimal
 	CanceledAmount  decimal.Decimal
 	ExecutedTotal   decimal.Decimal
 	AvailableTotal  decimal.Decimal
-	Description     string
-	ActivationType  ActivationType
+	CanceledTotal   decimal.Decimal
 }
 
 func (o *OrderUpdate) String() string {
@@ -160,6 +160,8 @@ func (o *OrderUpdate) String() string {
 func (o *Order) Cancel() {
 	o.CanceledAmount = o.CanceledAmount.Add(o.AvailableAmount)
 	o.AvailableAmount = decimal.Zero
+	o.CanceledTotal = o.CanceledTotal.Add(o.AvailableTotal)
+	o.AvailableTotal = decimal.Zero
 	o.Status = OrderStatusCanceled
 }
 
@@ -175,6 +177,7 @@ func (o *Order) ApplyUpdate(u *OrderUpdate) {
 	o.CanceledAmount = u.CanceledAmount
 	o.ExecutedTotal = o.ExecutedTotal.Add(u.ExecutedTotal)
 	o.AvailableTotal = u.AvailableTotal
+	o.CanceledTotal = u.CanceledTotal
 	u.ExecutedTotal = o.ExecutedTotal
 
 	if u.ActivationType != "" {
@@ -217,7 +220,7 @@ func NewOrder(r NewOrderRequest) (*Order, error) {
 	orderType := OrderType(r.Type)
 	_, ok := OrderTypeMap[orderType]
 	if !ok {
-		return nil, fmt.Errorf("unknown order type")
+		return nil, fmt.Errorf("unknown order type %s", orderType)
 	}
 
 	symbol, err := NewSymbol(r.Symbol)
