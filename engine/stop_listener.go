@@ -215,7 +215,7 @@ func (sl *StopOrderListener) RemoveOrder(o *models.Order) error {
 	priceNode = node.(*PriceNode)
 	err := priceNode.RemoveOrder(o.ID)
 	if err != nil {
-		return fmt.Errorf("RemoveOrder %d activation: %s %v, error: %v", o.ID, o.ActivationType, o.ActivationPrice, err)
+		return fmt.Errorf("RemoveOrder %s activation: %s %v, error: %v", o.ID.String(), o.ActivationType, o.ActivationPrice, err)
 	}
 	if priceNode.Len() == 0 {
 		tree.Delete(priceNode)

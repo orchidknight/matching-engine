@@ -119,12 +119,12 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 				ID:              matchedOrder.Order.ID,
 				Status:          models.OrderStatusCompleted,
 				AvailableAmount: Zero,
-				ExecutedAmount:  matchedOrder.Order.AvailableAmount,
+				ExecutedAmount:  matchedOrder.Order.ExecutedAmount.Add(matchedOrder.MatchedAmount),
 				CanceledAmount:  Zero,
 				ExecutedTotal:   matchedOrder.MatchedAmount.Mul(matchedOrder.Order.Price),
 			}
 			trade = &models.Trade{
-				ID:           fmt.Sprintf("%d_%d", takerOrder.ID, matchedOrder.Order.ID),
+				ID:           fmt.Sprintf("%s_%s", takerOrder.ID.String(), matchedOrder.Order.ID.String()),
 				TakerID:      takerOrder.Account,
 				MakerID:      matchedOrder.Order.Account,
 				Symbol:       takerOrder.Symbol,
@@ -174,7 +174,7 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 				ExecutedTotal:   matchedOrder.MatchedAmount.Mul(matchedOrder.Order.Price),
 			}
 			trade = &models.Trade{
-				ID:           fmt.Sprintf("%d_%d", takerOrder.ID, matchedOrder.Order.ID),
+				ID:           fmt.Sprintf("%s_%s", takerOrder.ID.String(), matchedOrder.Order.ID.String()),
 				TakerID:      takerOrder.Account,
 				MakerID:      matchedOrder.Order.Account,
 				Symbol:       takerOrder.Symbol,

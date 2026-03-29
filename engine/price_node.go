@@ -32,7 +32,7 @@ func (pn *PriceNode) String() string {
 // InsertOrder - Insert new order to price node
 func (pn *PriceNode) InsertOrder(order models.Order) error {
 	if _, ok := pn.orderMap.Get(order.ID); ok {
-		return fmt.Errorf("can't add order which is already in this PriceNode. PriceNode: %v, orderID: %d", pn.price, order.ID)
+		return fmt.Errorf("can't add order which is already in this PriceNode. PriceNode: %v, orderID: %s", pn.price, order.ID.String())
 	}
 	pn.orderMap.Set(order.ID, order)
 	pn.totalAmount = pn.totalAmount.Add(order.AvailableAmount)

@@ -79,11 +79,12 @@ type Order struct {
 	Status         OrderStatus  `json:"status"`
 	RejectedReason RejectReason `json:"rejectedReason"`
 
-	Amount          decimal.Decimal `json:"amount"`
+	OriginalAmount  decimal.Decimal `json:"amount"`
 	AvailableAmount decimal.Decimal `json:"availableAmount"`
 	ExecutedAmount  decimal.Decimal `json:"executedAmount"`
 	CanceledAmount  decimal.Decimal `json:"canceledAmount"`
 
+	OriginalTotal  decimal.Decimal `json:"originalTotal"`
 	AvailableTotal decimal.Decimal `json:"availableTotal"`
 	ExecutedTotal  decimal.Decimal `json:"executedTotal"`
 	CanceledTotal  decimal.Decimal `json:"canceledTotal"`
@@ -248,9 +249,10 @@ func NewOrder(r NewOrderRequest) (*Order, error) {
 		Type:            orderType,
 		Side:            orderSide,
 		Status:          OrderStatusNew,
+		OriginalAmount:  decimal.NewFromFloat(r.Amount),
 		AvailableAmount: decimal.NewFromFloat(r.Amount),
 		Price:           decimal.NewFromFloat(r.Price),
-		ExecutedTotal:   decimal.NewFromFloat(r.Size),
+		OriginalTotal:   decimal.NewFromFloat(r.Size),
 		AvailableTotal:  decimal.NewFromFloat(r.Size),
 		ActivationPrice: decimal.NewFromFloat(r.ActivationPrice),
 		CreatedAt:       time.Now().UTC(),
