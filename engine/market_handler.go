@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/shopspring/decimal"
+	"sync"
 
 	"github.com/orchidknight/matching-engine/models"
 )
@@ -17,6 +18,9 @@ type MarketHandler struct {
 	engine               *Engine
 	stopListener         StopListener
 	logger               models.Logger
+
+	done chan struct{}
+	once sync.Once
 }
 
 func (mh *MarketHandler) String() string {
@@ -36,6 +40,7 @@ func NewMarketHandler(engine *Engine, market *models.Market) (*MarketHandler, er
 		logger:               engine.logger,
 		incomingOrders:       incomingOrders,
 		stopListener:         NewStopListener(market.ID, priceChan, incomingOrders, engine.orders, engine.logger),
+		done:                 make(chan struct{}),
 	}
 
 	return &marketHandler, nil
@@ -43,12 +48,11 @@ func NewMarketHandler(engine *Engine, market *models.Market) (*MarketHandler, er
 
 func (mh *MarketHandler) Run(ctx context.Context) error {
 	mh.logger.Debug("engine", "Market handler %s running...", mh.id)
+	defer mh.once.Do(func() { close(mh.done) })
 
 	for {
 		select {
 		case <-ctx.Done():
-			close(mh.incomingOrders)
-
 			return nil
 		case o := <-mh.incomingOrders:
 			err := mh.ProcessOrder(ctx, o)
@@ -208,8 +212,19 @@ func (mh *MarketHandler) processToOrderbook(ctx context.Context, o *models.Order
 	return nil
 }
 
-func (mh *MarketHandler) ConsumeOrder(o *models.Order) {
-	mh.incomingOrders <- o
+func (mh *MarketHandler) ConsumeOrder(o *models.Order) bool {
+	select {
+	case <-mh.done:
+		return false
+	default:
+	}
+
+	select {
+	case <-mh.done:
+		return false
+	case mh.incomingOrders <- o:
+		return true
+	}
 }
 
 func (mh *MarketHandler) ProcessOrder(ctx context.Context, o *models.Order) error {
