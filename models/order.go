@@ -209,14 +209,14 @@ const (
 )
 
 type NewOrderRequest struct {
-	User            string  `json:"user"`
-	Symbol          string  `json:"pair"`
-	Type            string  `json:"type"`
-	Side            string  `json:"side"`
-	ActivationPrice float64 `json:"activationPrice"`
-	Price           float64 `json:"price"`
-	Size            float64 `json:"size"`
-	Amount          float64 `json:"amount"`
+	User            string `json:"user"`
+	Symbol          string `json:"pair"`
+	Type            string `json:"type"`
+	Side            string `json:"side"`
+	ActivationPrice string `json:"activationPrice"`
+	Price           string `json:"price"`
+	Size            string `json:"size"`
+	Amount          string `json:"amount"`
 }
 
 func NewOrder(r NewOrderRequest) (*Order, error) {
@@ -242,6 +242,23 @@ func NewOrder(r NewOrderRequest) (*Order, error) {
 		return nil, fmt.Errorf("unknown order side")
 	}
 
+	activationPrice, err := parseDecimalField("activationPrice", r.ActivationPrice)
+	if err != nil {
+		return nil, err
+	}
+	price, err := parseDecimalField("price", r.Price)
+	if err != nil {
+		return nil, err
+	}
+	size, err := parseDecimalField("size", r.Size)
+	if err != nil {
+		return nil, err
+	}
+	amount, err := parseDecimalField("amount", r.Amount)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Order{
 		ID:              uuid.New(),
 		Account:         r.User,
@@ -249,12 +266,25 @@ func NewOrder(r NewOrderRequest) (*Order, error) {
 		Type:            orderType,
 		Side:            orderSide,
 		Status:          OrderStatusNew,
-		OriginalAmount:  decimal.NewFromFloat(r.Amount),
-		AvailableAmount: decimal.NewFromFloat(r.Amount),
-		Price:           decimal.NewFromFloat(r.Price),
-		OriginalTotal:   decimal.NewFromFloat(r.Size),
-		AvailableTotal:  decimal.NewFromFloat(r.Size),
-		ActivationPrice: decimal.NewFromFloat(r.ActivationPrice),
+		OriginalAmount:  amount,
+		AvailableAmount: amount,
+		Price:           price,
+		OriginalTotal:   size,
+		AvailableTotal:  size,
+		ActivationPrice: activationPrice,
 		CreatedAt:       time.Now().UTC(),
 	}, nil
+}
+
+func parseDecimalField(field string, value string) (decimal.Decimal, error) {
+	if value == "" {
+		return decimal.Zero, nil
+	}
+
+	result, err := decimal.NewFromString(value)
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("invalid %s %q: %w", field, value, err)
+	}
+
+	return result, nil
 }

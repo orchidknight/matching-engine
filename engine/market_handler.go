@@ -3,29 +3,30 @@ package engine
 import (
 	"context"
 	"fmt"
-	"github.com/shopspring/decimal"
+	"math"
 	"sync"
+
+	"github.com/shopspring/decimal"
 
 	"github.com/orchidknight/matching-engine/models"
 )
 
 type MarketHandler struct {
-	id                   models.Symbol
-	marketAmountDecimals int
-	market               *models.Market
-	orderbook            *Orderbook
-	incomingOrders       chan *models.Order
-	priceUpdates         chan models.Price
-	engine               *Engine
-	stopListener         StopListener
-	logger               models.Logger
+	id             models.Symbol
+	market         *models.Market
+	orderbook      *Orderbook
+	incomingOrders chan *models.Order
+	priceUpdates   chan models.Price
+	engine         *Engine
+	stopListener   StopListener
+	logger         models.Logger
 
 	done chan struct{}
 	once sync.Once
 }
 
 func (mh *MarketHandler) String() string {
-	return fmt.Sprintf("MH id: %s market: %v amountDecimals: %d orderbookService: %v ", mh.id, mh.market, mh.marketAmountDecimals, mh.orderbook)
+	return fmt.Sprintf("MH id: %s market: %v orderbookService: %v ", mh.id, mh.market, mh.orderbook)
 }
 
 func NewMarketHandler(engine *Engine, market *models.Market) (*MarketHandler, error) {
@@ -33,16 +34,15 @@ func NewMarketHandler(engine *Engine, market *models.Market) (*MarketHandler, er
 	incomingOrders := make(chan *models.Order, 10000)
 	priceChan := make(chan models.Price, 100)
 	marketHandler := MarketHandler{
-		id:                   market.ID,
-		market:               market,
-		orderbook:            marketOrderbook,
-		engine:               engine,
-		marketAmountDecimals: market.QuoteAsset.CalculationPrecision,
-		logger:               engine.logger,
-		incomingOrders:       incomingOrders,
-		priceUpdates:         priceChan,
-		stopListener:         NewStopListener(market.ID, priceChan, incomingOrders, engine.orders, engine.logger),
-		done:                 make(chan struct{}),
+		id:             market.ID,
+		market:         market,
+		orderbook:      marketOrderbook,
+		engine:         engine,
+		logger:         engine.logger,
+		incomingOrders: incomingOrders,
+		priceUpdates:   priceChan,
+		stopListener:   NewStopListener(market.ID, priceChan, incomingOrders, engine.orders, engine.logger),
+		done:           make(chan struct{}),
 	}
 
 	return &marketHandler, nil
@@ -245,6 +245,11 @@ func (mh *MarketHandler) ProcessOrder(ctx context.Context, o *models.Order) erro
 		return mh.processCancel(ctx, o)
 	}
 
+	rejected, err := mh.validateOrder(ctx, o)
+	if rejected || err != nil {
+		return err
+	}
+
 	if o.IsNewStopOrder() {
 		return mh.processStopOrder(ctx, o)
 	}
@@ -254,6 +259,173 @@ func (mh *MarketHandler) ProcessOrder(ctx context.Context, o *models.Order) erro
 	}
 
 	return mh.processToOrderbook(ctx, o)
+}
+
+func (mh *MarketHandler) validateOrder(ctx context.Context, order *models.Order) (bool, error) {
+	if reason, rejected := mh.orderRejectReason(order); rejected {
+		return true, mh.rejectOrder(ctx, order, reason)
+	}
+
+	mh.normalizeOrderPrecision(order)
+
+	return false, nil
+}
+
+func (mh *MarketHandler) orderRejectReason(order *models.Order) (models.RejectReason, bool) {
+	if mh.isBelowMinOrderSize(order) {
+		return models.RejectReasonMinOrderSize, true
+	}
+
+	if orderHasLimitPrice(order) && !decimalFitsPrecision(order.Price, mh.quoteInputPrecision()) {
+		return models.RejectReasonInvalidPricePrecision, true
+	}
+
+	if order.IsNewStopOrder() && !decimalFitsPrecision(order.ActivationPrice, mh.quoteInputPrecision()) {
+		return models.RejectReasonInvalidPricePrecision, true
+	}
+
+	if !orderAmountsFitPrecision(order, mh.baseInputPrecision()) {
+		return models.RejectReasonInvalidAmountPrecision, true
+	}
+
+	if !orderTotalsFitPrecision(order, mh.quoteInputPrecision()) {
+		return models.RejectReasonInvalidTotalPrecision, true
+	}
+
+	return "", false
+}
+
+func (mh *MarketHandler) isBelowMinOrderSize(order *models.Order) bool {
+	if mh.market == nil || mh.market.MinOrderSize.LessThanOrEqual(Zero) {
+		return false
+	}
+
+	orderSize := order.AvailableAmount
+	if orderSize.Equal(Zero) {
+		orderSize = order.AvailableTotal
+	}
+
+	return orderSize.LessThan(mh.market.MinOrderSize)
+}
+
+func (mh *MarketHandler) normalizeOrderPrecision(order *models.Order) {
+	basePrecision := mh.baseCalculationPrecision()
+	quotePrecision := mh.quoteCalculationPrecision()
+
+	order.OriginalAmount = roundDecimal(order.OriginalAmount, basePrecision)
+	order.AvailableAmount = roundDecimal(order.AvailableAmount, basePrecision)
+	order.OriginalTotal = roundDecimal(order.OriginalTotal, quotePrecision)
+	order.AvailableTotal = roundDecimal(order.AvailableTotal, quotePrecision)
+	order.Price = roundDecimal(order.Price, quotePrecision)
+	order.ActivationPrice = roundDecimal(order.ActivationPrice, quotePrecision)
+}
+
+func (mh *MarketHandler) rejectOrder(ctx context.Context, order *models.Order, reason models.RejectReason) error {
+	order.Reject(reason)
+
+	err := mh.engine.orders.Reject(ctx, order)
+	if err != nil {
+		mh.logger.Error("orders", "Reject: %v", err)
+
+		return err
+	}
+
+	mh.engine.outcomingOrderResponses <- &models.OrderResponse{
+		Symbol:       order.Symbol,
+		InitialOrder: order,
+	}
+
+	mh.logger.Debug("engine", "Order <%s> has been rejected: %s", order.ID.String(), reason)
+
+	return nil
+}
+
+func (mh *MarketHandler) baseInputPrecision() int {
+	if mh.market == nil {
+		return 0
+	}
+
+	return inputPrecision(mh.market.BaseAsset)
+}
+
+func (mh *MarketHandler) quoteInputPrecision() int {
+	if mh.market == nil {
+		return 0
+	}
+
+	return inputPrecision(mh.market.QuoteAsset)
+}
+
+func (mh *MarketHandler) baseCalculationPrecision() int {
+	if mh.market == nil {
+		return 0
+	}
+
+	return calculationPrecision(mh.market.BaseAsset)
+}
+
+func (mh *MarketHandler) quoteCalculationPrecision() int {
+	if mh.market == nil {
+		return 0
+	}
+
+	return calculationPrecision(mh.market.QuoteAsset)
+}
+
+func inputPrecision(asset *models.Asset) int {
+	if asset == nil {
+		return 0
+	}
+
+	return asset.InputPrecision
+}
+
+func calculationPrecision(asset *models.Asset) int {
+	if asset == nil {
+		return 0
+	}
+
+	return asset.CalculationPrecision
+}
+
+func decimalFitsPrecision(value decimal.Decimal, precision int) bool {
+	decimalPrecision, ok := decimalPlaces(precision)
+	if !ok {
+		return false
+	}
+
+	return value.Equal(value.Round(decimalPrecision))
+}
+
+func roundDecimal(value decimal.Decimal, precision int) decimal.Decimal {
+	decimalPrecision, ok := decimalPlaces(precision)
+	if !ok {
+		return value
+	}
+
+	return value.Round(decimalPrecision)
+}
+
+func decimalPlaces(precision int) (int32, bool) {
+	if precision < 0 || precision > math.MaxInt32 {
+		return 0, false
+	}
+
+	return int32(precision), true //nolint:gosec // precision is checked against math.MaxInt32 before conversion.
+}
+
+func orderAmountsFitPrecision(order *models.Order, precision int) bool {
+	return decimalFitsPrecision(order.OriginalAmount, precision) &&
+		decimalFitsPrecision(order.AvailableAmount, precision)
+}
+
+func orderTotalsFitPrecision(order *models.Order, precision int) bool {
+	return decimalFitsPrecision(order.OriginalTotal, precision) &&
+		decimalFitsPrecision(order.AvailableTotal, precision)
+}
+
+func orderHasLimitPrice(order *models.Order) bool {
+	return order.Type == models.OrderTypeLimit || order.Type == models.OrderTypeStopLimit
 }
 
 func (mh *MarketHandler) processToMatch(ctx context.Context, order *models.Order) error {
