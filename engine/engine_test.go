@@ -135,12 +135,15 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 		t.Fatal("can't initialize engine", err.Error())
 	}
 
-	go engine.Run(ctx)
+	go func() {
+		if err := engine.Run(ctx); err != nil {
+			t.Errorf("engine.Run() error = %v", err)
+		}
+	}()
 
 	time.Sleep(2 * time.Second)
 
 	for name, tc := range tests {
-
 		t.Run(name, func(t *testing.T) {
 			engine.ConsumeOrder(tc.inputOrder)
 
@@ -150,7 +153,6 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 			if err != nil {
 				t.Errorf("order responses do not match: %v;  actual: %v want: %v", err, actualOrderResponse, tc.wantOrderResponse)
 			}
-
 		})
 	}
 }
@@ -186,7 +188,6 @@ type MarketServiceMock struct {
 
 func NewMarketsMock() models.MarketService {
 	return &MarketServiceMock{}
-
 }
 
 var MarketBTCUSDT = &models.Market{
@@ -198,15 +199,15 @@ var MarketBTCUSDT = &models.Market{
 	LastSpotPrice: decimal.Zero,
 }
 
-func (msm *MarketServiceMock) GetMarkets() ([]*models.Market, error) {
+func (*MarketServiceMock) GetMarkets() ([]*models.Market, error) {
 	return []*models.Market{MarketBTCUSDT}, nil
-
 }
-func (msm *MarketServiceMock) UpdateMarket(market *models.Market) error {
+
+func (*MarketServiceMock) UpdateMarket(*models.Market) error {
 	return nil
 }
 
-func (msm *MarketServiceMock) GetMarketByID(id string) (*models.Market, error) {
+func (*MarketServiceMock) GetMarketByID(string) (*models.Market, error) {
 	return MarketBTCUSDT, nil
 }
 
@@ -217,19 +218,20 @@ func NewOrdersMock() models.OrderService {
 type OrderServiceMock struct {
 }
 
-func (osm *OrderServiceMock) UpdateOrder(ctx context.Context, order *models.Order) error {
+func (*OrderServiceMock) UpdateOrder(context.Context, *models.Order) error {
 	return nil
 }
-func (osm *OrderServiceMock) GetOrderByID(ctx context.Context, id uuid.UUID) (*models.Order, error) {
-	return nil, nil
-}
-func (osm *OrderServiceMock) GetOrdersByPair(ctx context.Context, pair string) ([]*models.Order, error) {
+
+func (*OrderServiceMock) GetOrderByID(context.Context, uuid.UUID) (*models.Order, error) {
 	return nil, nil
 }
 
-func (osm *OrderServiceMock) Reject(ctx context.Context, o *models.Order) error {
-	return nil
+func (*OrderServiceMock) GetOrdersByPair(context.Context, string) ([]*models.Order, error) {
+	return nil, nil
+}
 
+func (*OrderServiceMock) Reject(context.Context, *models.Order) error {
+	return nil
 }
 
 func NewTradesMock() models.TradeService {
@@ -239,14 +241,12 @@ func NewTradesMock() models.TradeService {
 type TradeServiceMock struct {
 }
 
-func (tsm *TradeServiceMock) LastPrice(s models.Symbol) decimal.Decimal {
+func (*TradeServiceMock) LastPrice(models.Symbol) decimal.Decimal {
 	return decimal.Decimal{}
-
 }
 
-func (tsm *TradeServiceMock) ConsumeTrade(ctx context.Context, trade *models.Trade) error {
+func (*TradeServiceMock) ConsumeTrade(context.Context, *models.Trade) error {
 	return nil
-
 }
 
 func NewOrderbookMock() models.OrderbookService {
@@ -256,7 +256,7 @@ func NewOrderbookMock() models.OrderbookService {
 type OrderbookServiceMock struct {
 }
 
-func (osm *OrderbookServiceMock) ConsumeTrade(ctx context.Context, trade *models.Trade) error {
+func (*OrderbookServiceMock) ConsumeTrade(context.Context, *models.Trade) error {
 	return nil
 }
 
@@ -293,11 +293,7 @@ func compareOrderResponse(a, b *models.OrderResponse) error {
 	}
 
 	// LastPrice pointer
-	if err := cmpDecimalPtr(path+".LastPrice", a.LastPrice, b.LastPrice); err != nil {
-		return err
-	}
-
-	return nil
+	return cmpDecimalPtr(path+".LastPrice", a.LastPrice, b.LastPrice)
 }
 
 func cmpMatchedOrderResult(path string, a, b *models.MatchedOrderResult) error {
@@ -311,13 +307,11 @@ func cmpMatchedOrderResult(path string, a, b *models.MatchedOrderResult) error {
 	if err := cmpOrder(path+".Order", a.Order, b.Order); err != nil {
 		return err
 	}
-	if err := cmpTrade(path+".Trade", a.Trade, b.Trade); err != nil {
-		return err
-	}
 
-	return nil
+	return cmpTrade(path+".Trade", a.Trade, b.Trade)
 }
 
+//nolint:revive // cmpOrder intentionally reports the first differing field explicitly.
 func cmpOrder(path string, a, b *models.Order) error {
 	if a == nil && b == nil {
 		return nil
@@ -394,6 +388,7 @@ func cmpOrder(path string, a, b *models.Order) error {
 	return nil
 }
 
+//nolint:revive // cmpTrade intentionally reports the first differing field explicitly.
 func cmpTrade(path string, a, b *models.Trade) error {
 	if a == nil && b == nil {
 		return nil
@@ -453,6 +448,7 @@ func cmpDecimal(path string, a, b decimal.Decimal) error {
 	if !a.Equal(b) {
 		return diff(path, a.String(), b.String())
 	}
+
 	return nil
 }
 
@@ -468,11 +464,13 @@ func cmpDecimalPtr(path string, a, b *decimal.Decimal) error {
 		if b != nil {
 			bv = b.String()
 		}
+
 		return diff(path, av, bv)
 	}
 	if !a.Equal(*b) {
 		return diff(path, a.String(), b.String())
 	}
+
 	return nil
 }
 

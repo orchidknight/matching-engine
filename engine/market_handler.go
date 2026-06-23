@@ -15,6 +15,7 @@ type MarketHandler struct {
 	market               *models.Market
 	orderbook            *Orderbook
 	incomingOrders       chan *models.Order
+	priceUpdates         chan models.Price
 	engine               *Engine
 	stopListener         StopListener
 	logger               models.Logger
@@ -39,6 +40,7 @@ func NewMarketHandler(engine *Engine, market *models.Market) (*MarketHandler, er
 		marketAmountDecimals: market.QuoteAsset.CalculationPrecision,
 		logger:               engine.logger,
 		incomingOrders:       incomingOrders,
+		priceUpdates:         priceChan,
 		stopListener:         NewStopListener(market.ID, priceChan, incomingOrders, engine.orders, engine.logger),
 		done:                 make(chan struct{}),
 	}
@@ -225,6 +227,15 @@ func (mh *MarketHandler) ConsumeOrder(o *models.Order) bool {
 	case <-mh.done:
 		return false
 	case mh.incomingOrders <- o:
+		return true
+	}
+}
+
+func (mh *MarketHandler) PushPrice(price models.Price) bool {
+	select {
+	case <-mh.done:
+		return false
+	case mh.priceUpdates <- price:
 		return true
 	}
 }

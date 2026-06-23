@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -62,6 +64,64 @@ func TestOrderbookEnoughLiquidityUsesInsertedVolume(t *testing.T) {
 				t.Fatalf("EnoughLiquidity() = %v, want %v", got, testCase.want)
 			}
 		})
+	}
+}
+
+func TestOrderbookSnapshotConcurrentAccess(t *testing.T) {
+	testBook := newTestOrderbook()
+	start := make(chan struct{})
+	writerDone := make(chan struct{})
+	snapshotWorkers := startSnapshotWorkers(testBook, start, writerDone, 4)
+	defer snapshotWorkers.Wait()
+	defer close(writerDone)
+
+	close(start)
+
+	for i := range 1000 {
+		insertAndMatchSnapshotRaceOrder(t, testBook, i)
+	}
+}
+
+func startSnapshotWorkers(testBook *Orderbook, start <-chan struct{}, done <-chan struct{}, count int) *sync.WaitGroup {
+	var snapshotWorkers sync.WaitGroup
+
+	for range count {
+		snapshotWorkers.Add(1)
+		go func() {
+			defer snapshotWorkers.Done()
+			<-start
+
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					_ = testBook.Snapshot()
+				}
+			}
+		}()
+	}
+
+	return &snapshotWorkers
+}
+
+func insertAndMatchSnapshotRaceOrder(t *testing.T, testBook *Orderbook, iteration int) {
+	t.Helper()
+
+	makerOrder := newRestingOrder(models.Sell, decimal.NewFromInt(1))
+	makerOrder.Price = decimal.NewFromInt(int64(100 + iteration%10))
+
+	if err := testBook.InsertOrder(makerOrder); err != nil {
+		t.Fatalf("InsertOrder() error = %v", err)
+	}
+
+	takerOrder := newLimitOrder(models.Buy, decimal.NewFromInt(1), decimal.NewFromInt(200))
+	response := testBook.Match(context.Background(), takerOrder)
+	if response.InitialOrder == nil {
+		t.Fatal("Match().InitialOrder is nil")
+	}
+	if len(response.MatchedOrders) != 1 {
+		t.Fatalf("len(Match().MatchedOrders) = %d, want 1", len(response.MatchedOrders))
 	}
 }
 

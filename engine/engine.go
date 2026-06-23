@@ -104,19 +104,14 @@ func (e *Engine) getMarketHandler(id models.Symbol) (*MarketHandler, bool) {
 	defer e.lock.RUnlock()
 
 	v, ok := e.marketHandlers[id]
+
 	return v, ok
-}
-
-func (e *Engine) deleteMarketHandler(id models.Symbol) {
-	e.lock.Lock()
-	defer e.lock.Unlock()
-
-	delete(e.marketHandlers, id)
 }
 
 func (e *Engine) GetLastOrderResponse() *models.OrderResponse {
 	fmt.Println("GetLastOrderResponse")
 	resp := <-e.outcomingOrderResponses
+
 	return resp
 }
 
@@ -183,4 +178,19 @@ func (e *Engine) ConsumeOrder(order *models.Order) {
 	}
 
 	mh.ConsumeOrder(order)
+}
+
+// PushPrice routes the latest market price to the market stop-order listener.
+// It returns false when the price symbol is not registered or the handler is stopped.
+func (e *Engine) PushPrice(price models.Price) bool {
+	e.logger.Debug("RECEIVED", "Incoming price: %v", price)
+
+	mh, ok := e.getMarketHandler(price.Symbol)
+	if !ok {
+		e.logger.Warn("engine", "Unknown price symbol: %s", price.Symbol)
+
+		return false
+	}
+
+	return mh.PushPrice(price)
 }

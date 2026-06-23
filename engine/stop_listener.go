@@ -77,6 +77,10 @@ func (sl *StopOrderListener) processTriggeredOrders(ctx context.Context, trigger
 		dbOrder, err := sl.orders.GetOrderByID(ctx, triggeredOrder.ID)
 		if err != nil {
 			sl.log.Error("sol", "GetOrderByID: %v", err)
+			dbOrder = triggeredOrder
+		}
+		if dbOrder == nil {
+			dbOrder = triggeredOrder
 		}
 
 		dbOrder.Status = models.OrderStatusTriggered
@@ -144,6 +148,9 @@ func (sl *StopOrderListener) InsertOrder(order *models.Order) error {
 }
 
 func (sl *StopOrderListener) LessOrders(fromPrice decimal.Decimal) ([]*models.Order, error) {
+	sl.lock.RLock()
+	defer sl.lock.RUnlock()
+
 	var orders []*models.Order
 	var err error
 	var orderIDs []uuid.UUID
@@ -163,11 +170,14 @@ func (sl *StopOrderListener) LessOrders(fromPrice decimal.Decimal) ([]*models.Or
 		return true
 	}
 	sl.lessTree.AscendGreaterOrEqual(newPriceNode(fromPrice), priceIterator)
-	sl.log.Debug("sol", "MoreOrders: find more orders to %v: %s", fromPrice, orderIDs)
+	sl.log.Debug("sol", "LessOrders: find less orders to %v: %s", fromPrice, orderIDs)
 
 	return orders, err
 }
 func (sl *StopOrderListener) MoreOrders(fromPrice decimal.Decimal) ([]*models.Order, error) {
+	sl.lock.RLock()
+	defer sl.lock.RUnlock()
+
 	var orders []*models.Order
 	var err error
 	var orderIDs []uuid.UUID
@@ -205,6 +215,8 @@ func (sl *StopOrderListener) RemoveOrder(o *models.Order) error {
 		tree = sl.lessTree
 	case models.ActivationTypeMore:
 		tree = sl.moreTree
+	default:
+		return nil
 	}
 
 	node := tree.Get(newPriceNode(o.ActivationPrice))
