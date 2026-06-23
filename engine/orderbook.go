@@ -6,6 +6,7 @@ import (
 	"math"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/petar/GoLLRB/llrb"
 	"github.com/shopspring/decimal"
 
@@ -47,6 +48,15 @@ func NewOrderbook(market models.Symbol, service models.OrderbookService, o model
 	return book
 }
 
+func (book *Orderbook) changeVolume(side models.Side, amount decimal.Decimal) {
+	switch side {
+	case models.Sell:
+		book.asksVolume = book.asksVolume.Add(amount)
+	case models.Buy:
+		book.bidsVolume = book.bidsVolume.Add(amount)
+	}
+}
+
 func (book *Orderbook) InsertOrder(order *models.Order) error {
 	var err error
 	book.lock.Lock()
@@ -56,28 +66,25 @@ func (book *Orderbook) InsertOrder(order *models.Order) error {
 	switch order.Side {
 	case models.Sell:
 		tree = book.asksTree
-		price := tree.Get(newPriceNode(order.Price))
-		if price == nil {
-			price = newPriceNode(order.Price)
-			tree.InsertNoReplace(price)
-		}
-		err = price.(*PriceNode).InsertOrder(*order)
-		if err != nil {
-			return err
-		}
-
 	case models.Buy:
 		tree = book.bidsTree
-		price := tree.Get(newPriceNode(order.Price))
-		if price == nil {
-			price = newPriceNode(order.Price)
-			tree.InsertNoReplace(price)
-		}
-		err = price.(*PriceNode).InsertOrder(*order)
-		if err != nil {
-			return err
-		}
+	default:
+		return fmt.Errorf("unknown order side: %s", order.Side)
 	}
+
+	priceItem := tree.Get(newPriceNode(order.Price))
+	if priceItem == nil {
+		priceItem = newPriceNode(order.Price)
+		tree.InsertNoReplace(priceItem)
+	}
+
+	price := priceItem.(*PriceNode)
+	previousAmount := price.totalAmount
+	err = price.InsertOrder(*order)
+	if err != nil {
+		return err
+	}
+	book.changeVolume(order.Side, price.totalAmount.Sub(previousAmount))
 
 	book.log.Debug("book", "Inserted: %s P:%s A:%s", order.ID.String(), order.Price.String(), order.AvailableAmount.String())
 
@@ -102,10 +109,12 @@ func (book *Orderbook) ChangeOrder(_ context.Context, order *models.Order, chang
 		return fmt.Errorf("can't change order which is not in this orderbookService. book: %s, order: %+v", book.market, order)
 	}
 	price := node.(*PriceNode)
+	previousAmount := price.totalAmount
 	err = price.UpdateOrder(order.ID, changeAmount)
 	if err != nil {
 		return err
 	}
+	book.changeVolume(order.Side, price.totalAmount.Sub(previousAmount))
 	if price.Len() <= 0 {
 		tree.Delete(price)
 	}
@@ -138,10 +147,7 @@ func (book *Orderbook) RemoveOrder(order *models.Order) error {
 	}
 
 	price := plItem.(*PriceNode)
-
-	if price == nil {
-		return fmt.Errorf("pl is nil when RemoveOrder, book: %s, order: %+v", book.market, order)
-	}
+	previousAmount := price.totalAmount
 
 	err = price.RemoveOrder(order.ID)
 	if err != nil {
@@ -149,6 +155,7 @@ func (book *Orderbook) RemoveOrder(order *models.Order) error {
 
 		return err
 	}
+	book.changeVolume(order.Side, price.totalAmount.Sub(previousAmount))
 
 	if price.Len() <= 0 {
 		tree.Delete(price)
@@ -161,46 +168,31 @@ func (book *Orderbook) RemoveOrder(order *models.Order) error {
 }
 
 func (book *Orderbook) Snapshot() models.Snapshot {
+	book.lock.RLock()
+	defer book.lock.RUnlock()
+
 	bids := make([][2]decimal.Decimal, 0)
 	asks := make([][2]decimal.Decimal, 0)
 
-	asyncWaitGroup := sync.WaitGroup{}
-
-	asyncWaitGroup.Add(1)
-	go func() {
-		var asksVolume decimal.Decimal
-		book.asksTree.AscendGreaterOrEqual(newPriceNode(decimal.NewFromUint64(0)), func(i llrb.Item) bool {
-			pl := i.(*PriceNode)
-			if pl.price.Equal(decimal.NewFromUint64(0)) {
-				return true
-			}
-			asks = append(asks, [2]decimal.Decimal{pl.price, pl.totalAmount})
-			asksVolume = asksVolume.Add(pl.totalAmount)
-
+	book.asksTree.AscendGreaterOrEqual(newPriceNode(decimal.NewFromUint64(0)), func(i llrb.Item) bool {
+		pl := i.(*PriceNode)
+		if pl.price.Equal(decimal.NewFromUint64(0)) {
 			return true
-		})
-		book.asksVolume = asksVolume
-		asyncWaitGroup.Done()
-	}()
+		}
+		asks = append(asks, [2]decimal.Decimal{pl.price, pl.totalAmount})
 
-	asyncWaitGroup.Add(1)
-	go func() {
-		var bidsVolume decimal.Decimal
-		book.bidsTree.DescendLessOrEqual(newPriceNode(decimal.NewFromUint64(math.MaxUint64)), func(i llrb.Item) bool {
-			pl := i.(*PriceNode)
-			if pl.price.Equal(decimal.NewFromUint64(0)) {
-				return true
-			}
-			bids = append(bids, [2]decimal.Decimal{pl.price, pl.totalAmount})
-			bidsVolume = bidsVolume.Add(pl.totalAmount)
+		return true
+	})
 
+	book.bidsTree.DescendLessOrEqual(newPriceNode(decimal.NewFromUint64(math.MaxUint64)), func(i llrb.Item) bool {
+		pl := i.(*PriceNode)
+		if pl.price.Equal(decimal.NewFromUint64(0)) {
 			return true
-		})
-		book.bidsVolume = bidsVolume
-		asyncWaitGroup.Done()
-	}()
+		}
+		bids = append(bids, [2]decimal.Decimal{pl.price, pl.totalAmount})
 
-	asyncWaitGroup.Wait()
+		return true
+	})
 
 	res := models.Snapshot{
 		Symbol: book.market,
@@ -253,6 +245,13 @@ func (book *Orderbook) EnoughLiquidity(order *models.Order) bool {
 		return true
 	}
 
+	if order.AvailableAmount.Equal(Zero) {
+		return true
+	}
+
+	book.lock.RLock()
+	defer book.lock.RUnlock()
+
 	switch order.Side {
 	case models.Sell:
 		if book.bidsVolume.Sub(order.AvailableAmount).GreaterThanOrEqual(Zero) {
@@ -280,7 +279,7 @@ func (book *Orderbook) MinAsk() decimal.Decimal {
 	return decimal.NewFromUint64(0)
 }
 
-func (book *Orderbook) GetOrder(id uint64, side string, price decimal.Decimal) (models.Order, bool) {
+func (book *Orderbook) GetOrder(id uuid.UUID, side string, price decimal.Decimal) (models.Order, bool) {
 	book.lock.Lock()
 	defer book.lock.Unlock()
 

@@ -41,7 +41,7 @@ func (pn *PriceNode) InsertOrder(order models.Order) error {
 }
 
 // GetOrder - Read
-func (pn *PriceNode) GetOrder(id uint64) (order models.Order, exist bool) {
+func (pn *PriceNode) GetOrder(id uuid.UUID) (order models.Order, exist bool) {
 	orderItem, exist := pn.orderMap.Get(id)
 	if !exist {
 		return models.Order{}, exist

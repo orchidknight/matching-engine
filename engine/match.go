@@ -69,10 +69,14 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 
 	case models.OrderTypeLimit, models.OrderTypeStopLimit:
 		// If the limit or stop limit order is not completely filled, we send it to the order book
-		if !result.IsDone && result.AmountLeft.GreaterThan(Zero) && result.AmountDone.GreaterThan(Zero) {
+		if !result.IsDone && result.AmountLeft.GreaterThan(Zero) {
+			status := models.OrderStatusOpen
+			if result.AmountDone.GreaterThan(Zero) {
+				status = models.OrderStatusPartiallyCompleted
+			}
 			orderUpdate := &models.OrderUpdate{
 				ID:              takerOrder.ID,
-				Status:          models.OrderStatusPartiallyCompleted,
+				Status:          status,
 				AvailableAmount: result.AmountLeft,
 				ExecutedAmount:  result.AmountDone,
 				CanceledAmount:  Zero,
@@ -100,6 +104,7 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 				ExecutedTotal:   result.TotalDone,
 			}
 			takerOrder.ApplyUpdate(orderUpdate)
+			response.InitialOrder = takerOrder
 		}
 	}
 
