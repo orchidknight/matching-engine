@@ -49,6 +49,46 @@ func TestNewOrderRejectsInvalidDecimalString(t *testing.T) {
 	}
 }
 
+func TestApplyUpdateDoesNotMutateInput(t *testing.T) {
+	order := &Order{
+		ExecutedTotal: decimal.NewFromInt(50),
+	}
+	update := &OrderUpdate{
+		Status:         OrderStatusPartiallyCompleted,
+		ExecutedAmount: decimal.NewFromInt(2),
+		ExecutedTotal:  decimal.NewFromInt(200),
+	}
+
+	order.ApplyUpdate(update)
+
+	if !update.ExecutedTotal.Equal(decimal.NewFromInt(200)) {
+		t.Fatalf("update.ExecutedTotal mutated to %s, want 200", update.ExecutedTotal)
+	}
+	if !update.AvgPrice.Equal(decimal.Zero) {
+		t.Fatalf("update.AvgPrice mutated to %s, want 0", update.AvgPrice)
+	}
+}
+
+func TestApplyUpdateComputesOrderState(t *testing.T) {
+	order := &Order{
+		ExecutedTotal: decimal.NewFromInt(50),
+	}
+	update := &OrderUpdate{
+		Status:         OrderStatusPartiallyCompleted,
+		ExecutedAmount: decimal.NewFromInt(5),
+		ExecutedTotal:  decimal.NewFromInt(200),
+	}
+
+	order.ApplyUpdate(update)
+
+	if order.Status != OrderStatusPartiallyCompleted {
+		t.Fatalf("order.Status = %s, want %s", order.Status, OrderStatusPartiallyCompleted)
+	}
+	// ExecutedTotal accumulates: 50 + 200 = 250; AvgPrice = 250 / 5 = 50.
+	assertDecimalEqual(t, order.ExecutedTotal, "250")
+	assertDecimalEqual(t, order.AvgPrice, "50")
+}
+
 func assertDecimalEqual(t *testing.T, got decimal.Decimal, want string) {
 	t.Helper()
 

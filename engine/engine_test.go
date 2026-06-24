@@ -122,10 +122,6 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 				},
 			},
 		},
-		//"matched 1 to 1 order, maker order completed":           {},
-		//"matched 1 to 1 order, maker order partially completed": {},
-		//"matched 1 to 2 orders, maker orders completed":         {},
-		//"matched aggressive limit order":                        {},
 	}
 
 	for _, testCase := range tests {

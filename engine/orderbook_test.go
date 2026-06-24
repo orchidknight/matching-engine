@@ -131,6 +131,7 @@ func insertAndMatchSnapshotRaceOrder(t *testing.T, testBook *Orderbook, iteratio
 func newTestOrderbook() *Orderbook {
 	return NewOrderbook(
 		models.Symbol("BTC-USDT"),
+		defaultBaseScale,
 		NewOrderbookMock(),
 		NewOrdersMock(),
 		NewMarketsMock(),

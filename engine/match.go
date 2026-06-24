@@ -14,6 +14,14 @@ import (
 
 var Zero = decimal.Zero
 
+// divFloor divides total by price and floors the quotient to the base asset
+// scale. Flooring (truncation toward zero) guarantees the taker is never
+// credited base it did not pay for, and makes the result independent of the
+// process-global decimal.DivisionPrecision.
+func (book *Orderbook) divFloor(total, price decimal.Decimal) decimal.Decimal {
+	return total.Div(price).Truncate(book.baseScale)
+}
+
 // nolint nestif
 func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) (*models.OrderResponse, error) {
 	var err error
@@ -415,7 +423,7 @@ func (book *Orderbook) MatchOrderWithTotal(takerOrder *models.Order) *MatchResul
 					matchedTotal = matchedTotal.Add(matchedItem.MatchedAmount.Mul(makerOrder.Price))
 					matchedAmount = matchedAmount.Add(matchedItem.MatchedAmount)
 				} else {
-					matchedItem.MatchedAmount = leftTotal.Div(makerOrder.Price)
+					matchedItem.MatchedAmount = book.divFloor(leftTotal, makerOrder.Price)
 					matchedItem.IsDone = false
 					matchedTotal = matchedTotal.Add(leftTotal)
 					leftTotal = Zero
@@ -429,7 +437,7 @@ func (book *Orderbook) MatchOrderWithTotal(takerOrder *models.Order) *MatchResul
 					matchedTotal = matchedTotal.Add(matchedItem.MatchedAmount.Mul(makerOrder.Price))
 					matchedAmount = matchedAmount.Add(matchedItem.MatchedAmount)
 				} else {
-					matchedItem.MatchedAmount = leftTotal.Div(makerOrder.Price)
+					matchedItem.MatchedAmount = book.divFloor(leftTotal, makerOrder.Price)
 					matchedItem.IsDone = false
 					leftTotal = Zero
 					matchedTotal = matchedTotal.Add(matchedItem.MatchedAmount.Mul(makerOrder.Price))

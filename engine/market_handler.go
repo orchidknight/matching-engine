@@ -29,8 +29,16 @@ func (mh *MarketHandler) String() string {
 	return fmt.Sprintf("MH id: %s market: %v orderbookService: %v ", mh.id, mh.market, mh.orderbook)
 }
 
+// defaultBaseScale is used when a market's base asset precision is missing or
+// out of range; it keeps divided quantities at full practical precision.
+const defaultBaseScale int32 = 18
+
 func NewMarketHandler(engine *Engine, market *models.Market) (*MarketHandler, error) {
-	marketOrderbook := NewOrderbook(market.ID, engine.orderbook, engine.orders, engine.markets, engine.trades, engine.logger)
+	baseScale, ok := decimalPlaces(calculationPrecision(market.BaseAsset))
+	if !ok {
+		baseScale = defaultBaseScale
+	}
+	marketOrderbook := NewOrderbook(market.ID, baseScale, engine.orderbook, engine.orders, engine.markets, engine.trades, engine.logger)
 	incomingOrders := make(chan *models.Order, 10000)
 	priceChan := make(chan models.Price, 100)
 	marketHandler := MarketHandler{
@@ -83,27 +91,6 @@ func (mh *MarketHandler) RegisterOrder(order *models.Order) error {
 	default:
 		return fmt.Errorf("can't register order %s with order status %s", order.ID.String(), order.Status)
 	}
-
-	return nil
-}
-
-func (mh *MarketHandler) Reset() error {
-	for i := false; !i; {
-		item := mh.orderbook.asksTree.DeleteMin()
-		if item == nil {
-			i = true
-		}
-	}
-
-	for i := false; !i; {
-		item := mh.orderbook.bidsTree.DeleteMax()
-		if item == nil {
-			i = true
-		}
-	}
-
-	mh.orderbook.asksVolume = decimal.Zero
-	mh.orderbook.bidsVolume = decimal.Zero
 
 	return nil
 }
@@ -281,6 +268,14 @@ func (mh *MarketHandler) validateOrder(ctx context.Context, order *models.Order)
 }
 
 func (mh *MarketHandler) orderRejectReason(order *models.Order) (models.RejectReason, bool) {
+	// A limit/stop-limit order is sized by amount: it rests in the book at its
+	// price for that quantity. Without a positive amount it cannot be matched or
+	// rested (the quote-total path leaves AmountLeft zero), so reject it up front
+	// instead of letting it fall through Match and disappear.
+	if orderHasLimitPrice(order) && order.AvailableAmount.LessThanOrEqual(Zero) {
+		return models.RejectReasonMissingAmount, true
+	}
+
 	if mh.isBelowMinOrderSize(order) {
 		return models.RejectReasonMinOrderSize, true
 	}

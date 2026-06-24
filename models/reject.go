@@ -12,4 +12,5 @@ const (
 	RejectReasonInvalidPricePrecision  = "Order price precision exceeds market tick size"
 	RejectReasonInvalidAmountPrecision = "Order amount precision exceeds market lot size"
 	RejectReasonInvalidTotalPrecision  = "Order total precision exceeds quote precision"
+	RejectReasonMissingAmount          = "Limit order must specify a positive amount"
 )

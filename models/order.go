@@ -165,7 +165,6 @@ func (o *Order) ApplyUpdate(u *OrderUpdate) {
 	o.ExecutedTotal = o.ExecutedTotal.Add(u.ExecutedTotal)
 	o.AvailableTotal = u.AvailableTotal
 	o.CanceledTotal = u.CanceledTotal
-	u.ExecutedTotal = o.ExecutedTotal
 
 	if u.ActivationType != "" {
 		o.ActivationType = u.ActivationType
@@ -173,10 +172,8 @@ func (o *Order) ApplyUpdate(u *OrderUpdate) {
 
 	if o.ExecutedAmount.Equal(decimal.NewFromUint64(0)) {
 		o.AvgPrice = decimal.NewFromUint64(0)
-		u.AvgPrice = decimal.NewFromUint64(0)
 	} else {
 		o.AvgPrice = o.ExecutedTotal.Div(o.ExecutedAmount)
-		u.AvgPrice = o.AvgPrice
 	}
 }
 

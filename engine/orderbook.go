@@ -25,14 +25,21 @@ type Orderbook struct {
 	asksTree   *llrb.LLRB
 	asksVolume decimal.Decimal
 
+	// baseScale is the base asset calculation precision. Quantities derived by
+	// dividing a quote total by a price are floored to this scale (see Div sites
+	// in match.go) so the result is deterministic and independent of the global
+	// decimal.DivisionPrecision.
+	baseScale int32
+
 	lock sync.RWMutex
 	log  models.Logger
 }
 
 // NewOrderbook return a new book
-func NewOrderbook(market models.Symbol, service models.OrderbookService, o models.OrderService, m models.MarketService, t models.TradeService, log models.Logger) *Orderbook {
+func NewOrderbook(market models.Symbol, baseScale int32, service models.OrderbookService, o models.OrderService, m models.MarketService, t models.TradeService, log models.Logger) *Orderbook {
 	book := &Orderbook{
 		market:           market,
+		baseScale:        baseScale,
 		bidsTree:         llrb.New(),
 		asksTree:         llrb.New(),
 		lock:             sync.RWMutex{},
@@ -267,8 +274,8 @@ func (book *Orderbook) EnoughLiquidity(order *models.Order) bool {
 }
 
 func (book *Orderbook) MinAsk() decimal.Decimal {
-	book.lock.Lock()
-	defer book.lock.Unlock()
+	book.lock.RLock()
+	defer book.lock.RUnlock()
 
 	minItem := book.asksTree.Min()
 
@@ -280,8 +287,8 @@ func (book *Orderbook) MinAsk() decimal.Decimal {
 }
 
 func (book *Orderbook) GetOrder(id uuid.UUID, side string, price decimal.Decimal) (models.Order, bool) {
-	book.lock.Lock()
-	defer book.lock.Unlock()
+	book.lock.RLock()
+	defer book.lock.RUnlock()
 
 	var tree *llrb.LLRB
 	if side == "sell" {
@@ -300,8 +307,8 @@ func (book *Orderbook) GetOrder(id uuid.UUID, side string, price decimal.Decimal
 }
 
 func (book *Orderbook) MaxBid() decimal.Decimal {
-	book.lock.Lock()
-	defer book.lock.Unlock()
+	book.lock.RLock()
+	defer book.lock.RUnlock()
 
 	maxItem := book.bidsTree.Max()
 	if maxItem != nil {

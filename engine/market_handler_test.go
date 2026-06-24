@@ -35,6 +35,14 @@ func TestMarketHandlerProcessOrderRejectsInvalidMarketInput(t *testing.T) {
 			order:      newValidationStopLimitOrder(decimal.RequireFromString("90.001")),
 			wantReason: models.RejectReasonInvalidPricePrecision,
 		},
+		"limit order without amount": {
+			order:      newValidationLimitOrderWithoutAmount(models.OrderTypeLimit),
+			wantReason: models.RejectReasonMissingAmount,
+		},
+		"stop-limit order without amount": {
+			order:      newValidationLimitOrderWithoutAmount(models.OrderTypeStopLimit),
+			wantReason: models.RejectReasonMissingAmount,
+		},
 	}
 
 	for testName, testCase := range tests {
@@ -115,6 +123,20 @@ func newValidationMarketOrderWithTotal(total decimal.Decimal) *models.Order {
 		Status:         models.OrderStatusNew,
 		Side:           models.Buy,
 		AvailableTotal: total,
+	}
+}
+
+func newValidationLimitOrderWithoutAmount(orderType models.OrderType) *models.Order {
+	return &models.Order{
+		ID:              uuid.New(),
+		Account:         "taker",
+		Symbol:          "BTC-USDT",
+		Type:            orderType,
+		Status:          models.OrderStatusNew,
+		Side:            models.Buy,
+		AvailableTotal:  decimal.NewFromInt(100),
+		Price:           decimal.NewFromInt(100),
+		ActivationPrice: decimal.NewFromInt(90),
 	}
 }
 

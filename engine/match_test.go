@@ -245,6 +245,35 @@ func TestMatchOrderWithTotalBuildsPartialPriceLevelResult(t *testing.T) {
 	requirePartialRawMatchedOrder(t, result.MatchedOrders, 1, highPriceMaker, decimal.NewFromInt(1))
 }
 
+func TestMatchOrderWithTotalFloorsAmountToBaseScale(t *testing.T) {
+	testBook := newTestOrderbook()
+	testBook.baseScale = 2
+
+	maker := newRestingOrder(models.Sell, decimal.NewFromInt(5))
+	maker.Price = decimal.NewFromInt(3)
+	if err := testBook.InsertOrder(maker); err != nil {
+		t.Fatalf("InsertOrder() error = %v", err)
+	}
+
+	taker := &models.Order{
+		ID:             uuid.New(),
+		Account:        "taker",
+		Symbol:         "BTC-USDT",
+		Type:           models.OrderTypeMarket,
+		Status:         models.OrderStatusNew,
+		Side:           models.Buy,
+		AvailableTotal: decimal.NewFromInt(10),
+	}
+
+	result := testBook.MatchOrderWithTotal(taker)
+
+	// 10 quote / price 3 = 3.3333…; engine must floor to baseScale (2 dp) = 3.33,
+	// never crediting the taker base it did not pay for, and independent of the
+	// global decimal.DivisionPrecision.
+	requireDecimalEqual(t, "amount done", result.AmountDone, decimal.RequireFromString("3.33"))
+	requireRawMatchedOrder(t, result.MatchedOrders, 0, maker, decimal.RequireFromString("3.33"))
+}
+
 func TestMatchMarketableLimitWithOnlySelfLiquidityRestsOrder(t *testing.T) {
 	testBook := newTestOrderbook()
 	restingAsk := newRestingOrder(models.Sell, decimal.NewFromInt(5))
