@@ -14,14 +14,6 @@ func (o Side) String() string {
 	return string(o)
 }
 
-func (o Side) Opposite() Side {
-	if o == Buy {
-		return Sell
-	}
-
-	return Buy
-}
-
 const (
 	Unspecified Side = "Unspecified"
 	Buy         Side = "Buy"
@@ -99,10 +91,6 @@ type Order struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-func (o *Order) TotalExecuted() decimal.Decimal {
-	return o.ExecutedAmount.Mul(o.AvgPrice)
-}
-
 func (o *Order) IsNewStopOrder() bool {
 	return (o.Type == OrderTypeStopMarket || o.Type == OrderTypeStopLimit) && o.Status == OrderStatusNew
 }
@@ -118,10 +106,6 @@ type OrderResponse struct {
 	InitialOrder  *Order                `json:"initial_order"`
 	MatchedOrders []*MatchedOrderResult `json:"matched_orders"`
 	LastPrice     *decimal.Decimal      `json:"last_price"`
-}
-
-type TakerOrderResult struct {
-	Order *Order `json:"order"`
 }
 
 type MatchedOrderResult struct {

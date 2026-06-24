@@ -175,7 +175,7 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) (*mo
 
 			trades = append(trades, trade)
 		} else {
-			// частично заполнили ордер
+			// Partially filled the maker order.
 			originalMakerOrder := *matchedOrder.Order
 			err = book.ChangeOrder(ctx, matchedOrder.Order, matchedOrder.MatchedAmount)
 			if err != nil {

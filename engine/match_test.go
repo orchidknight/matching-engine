@@ -206,8 +206,8 @@ func TestMatchOrderWithAmountBuildsPricePriorityResult(t *testing.T) {
 	requireDecimalEqual(t, "amount left", result.AmountLeft, decimal.Zero)
 	requireDecimalEqual(t, "amount done", result.AmountDone, decimal.NewFromInt(4))
 	requireDecimalEqual(t, "total done", result.TotalDone, decimal.NewFromInt(402))
-	requireRawMatchedOrder(t, result.MatchedOrders, 0, lowPriceMaker, true, decimal.NewFromInt(2))
-	requireRawMatchedOrder(t, result.MatchedOrders, 1, highPriceMaker, false, decimal.NewFromInt(2))
+	requireCompletedRawMatchedOrder(t, result.MatchedOrders, 0, lowPriceMaker, decimal.NewFromInt(2))
+	requirePartialRawMatchedOrder(t, result.MatchedOrders, 1, highPriceMaker, decimal.NewFromInt(2))
 }
 
 func TestMatchOrderWithTotalBuildsPartialPriceLevelResult(t *testing.T) {
@@ -241,8 +241,8 @@ func TestMatchOrderWithTotalBuildsPartialPriceLevelResult(t *testing.T) {
 	requireDecimalEqual(t, "total left", result.TotalLeft, decimal.Zero)
 	requireDecimalEqual(t, "total done", result.TotalDone, decimal.NewFromInt(320))
 	requireDecimalEqual(t, "amount done", result.AmountDone, decimal.NewFromInt(3))
-	requireRawMatchedOrder(t, result.MatchedOrders, 0, lowPriceMaker, true, decimal.NewFromInt(2))
-	requireRawMatchedOrder(t, result.MatchedOrders, 1, highPriceMaker, false, decimal.NewFromInt(1))
+	requireCompletedRawMatchedOrder(t, result.MatchedOrders, 0, lowPriceMaker, decimal.NewFromInt(2))
+	requirePartialRawMatchedOrder(t, result.MatchedOrders, 1, highPriceMaker, decimal.NewFromInt(1))
 }
 
 func TestMatchMarketableLimitWithOnlySelfLiquidityRestsOrder(t *testing.T) {
@@ -386,14 +386,43 @@ func requireMatchedMaker(
 	requireOrderState(t, matchedOrder.Order, wantStatus, wantMaker.AvailableAmount.Sub(wantMatchedAmount), wantMatchedAmount, wantMatchedAmount.Mul(wantMaker.Price))
 }
 
+func requireCompletedRawMatchedOrder(
+	t *testing.T,
+	matchedOrders []*models.MatchedOrder,
+	index int,
+	wantMaker *models.Order,
+	wantMatchedAmount decimal.Decimal,
+) {
+	t.Helper()
+
+	matchedOrder := requireRawMatchedOrder(t, matchedOrders, index, wantMaker, wantMatchedAmount)
+	if !matchedOrder.IsDone {
+		t.Fatalf("matchedOrders[%d].IsDone = false, want true", index)
+	}
+}
+
+func requirePartialRawMatchedOrder(
+	t *testing.T,
+	matchedOrders []*models.MatchedOrder,
+	index int,
+	wantMaker *models.Order,
+	wantMatchedAmount decimal.Decimal,
+) {
+	t.Helper()
+
+	matchedOrder := requireRawMatchedOrder(t, matchedOrders, index, wantMaker, wantMatchedAmount)
+	if matchedOrder.IsDone {
+		t.Fatalf("matchedOrders[%d].IsDone = true, want false", index)
+	}
+}
+
 func requireRawMatchedOrder(
 	t *testing.T,
 	matchedOrders []*models.MatchedOrder,
 	index int,
 	wantMaker *models.Order,
-	wantDone bool,
 	wantMatchedAmount decimal.Decimal,
-) {
+) *models.MatchedOrder {
 	t.Helper()
 
 	if len(matchedOrders) <= index {
@@ -404,10 +433,9 @@ func requireRawMatchedOrder(
 	if matchedOrder.Order.ID != wantMaker.ID {
 		t.Fatalf("matchedOrders[%d].Order.ID = %s, want %s", index, matchedOrder.Order.ID, wantMaker.ID)
 	}
-	if matchedOrder.IsDone != wantDone {
-		t.Fatalf("matchedOrders[%d].IsDone = %v, want %v", index, matchedOrder.IsDone, wantDone)
-	}
 	requireDecimalEqual(t, "matched amount", matchedOrder.MatchedAmount, wantMatchedAmount)
+
+	return matchedOrder
 }
 
 func requireTrade(

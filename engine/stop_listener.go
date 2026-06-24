@@ -3,8 +3,9 @@ package engine
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
 	"sync"
+
+	"github.com/google/uuid"
 
 	"github.com/petar/GoLLRB/llrb"
 	"github.com/shopspring/decimal"
