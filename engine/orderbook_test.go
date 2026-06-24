@@ -116,7 +116,10 @@ func insertAndMatchSnapshotRaceOrder(t *testing.T, testBook *Orderbook, iteratio
 	}
 
 	takerOrder := newLimitOrder(models.Buy, decimal.NewFromInt(1), decimal.NewFromInt(200))
-	response := testBook.Match(context.Background(), takerOrder)
+	response, err := testBook.Match(context.Background(), takerOrder)
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
 	if response.InitialOrder == nil {
 		t.Fatal("Match().InitialOrder is nil")
 	}

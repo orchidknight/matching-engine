@@ -15,7 +15,7 @@ import (
 var Zero = decimal.Zero
 
 // nolint nestif
-func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *models.OrderResponse {
+func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) (*models.OrderResponse, error) {
 	var err error
 	var trade *models.Trade
 	var trades []*models.Trade
@@ -33,12 +33,12 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 		takerOrder.Reject(models.RejectReasonWrongInput)
 		err = book.orders.Reject(ctx, takerOrder)
 		if err != nil {
-			book.log.Error("book", "Reject: %v", err)
+			return nil, fmt.Errorf("reject wrong input order: %w", err)
 		}
 
 		response.InitialOrder = takerOrder
 
-		return response
+		return response, nil
 	}
 
 	switch takerOrder.Type {
@@ -48,12 +48,12 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 			takerOrder.Reject(models.RejectReasonNoMatches)
 			err = book.orders.Reject(ctx, takerOrder)
 			if err != nil {
-				book.log.Error("book", "Reject: %v", err)
+				return nil, fmt.Errorf("reject market order with no matches: %w", err)
 			}
 
 			response.InitialOrder = takerOrder
 
-			return response
+			return response, nil
 		}
 
 		orderUpdate := &models.OrderUpdate{
@@ -74,6 +74,7 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 			if result.AmountDone.GreaterThan(Zero) {
 				status = models.OrderStatusPartiallyCompleted
 			}
+			originalTakerOrder := *takerOrder
 			orderUpdate := &models.OrderUpdate{
 				ID:              takerOrder.ID,
 				Status:          status,
@@ -85,12 +86,20 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 			takerOrder.ApplyUpdate(orderUpdate)
 			err = book.InsertOrder(takerOrder)
 			if err != nil {
-				book.log.Error("book", "Insert order: %v", err)
+				*takerOrder = originalTakerOrder
+
+				return nil, fmt.Errorf("insert resting taker order: %w", err)
 			}
 
 			err = book.orders.UpdateOrder(ctx, takerOrder)
 			if err != nil {
-				book.log.Error("book", "UpdateOrder: %v", err)
+				rollbackErr := book.RemoveOrder(takerOrder)
+				*takerOrder = originalTakerOrder
+				if rollbackErr != nil {
+					return nil, fmt.Errorf("update resting taker order: %w; rollback resting taker order: %v", err, rollbackErr)
+				}
+
+				return nil, fmt.Errorf("update resting taker order: %w", err)
 			}
 			response.InitialOrder = takerOrder
 		}
@@ -111,9 +120,10 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 	for _, matchedOrder := range result.MatchedOrders {
 		// filled out the order and removed it from the order book
 		if matchedOrder.IsDone {
+			originalMakerOrder := *matchedOrder.Order
 			err = book.RemoveOrder(matchedOrder.Order)
 			if err != nil {
-				book.log.Error("book", "RemoveOrder: %v", err)
+				return nil, fmt.Errorf("remove completed maker order: %w", err)
 			}
 			orderUpdate := &models.OrderUpdate{
 				ID:              matchedOrder.Order.ID,
@@ -139,17 +149,23 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 			matchedOrder.Order.ApplyUpdate(orderUpdate)
 			matchedOrder.Order.LastTrade = trade
 
+			err = book.orders.UpdateOrder(ctx, matchedOrder.Order)
+			if err != nil {
+				rollbackErr := book.InsertOrder(&originalMakerOrder)
+				*matchedOrder.Order = originalMakerOrder
+				if rollbackErr != nil {
+					return nil, fmt.Errorf("update completed maker order: %w; rollback completed maker order: %v", err, rollbackErr)
+				}
+
+				return nil, fmt.Errorf("update completed maker order: %w", err)
+			}
+
 			if err = book.trades.ConsumeTrade(ctx, trade); err != nil {
-				book.log.Error("tradeService", "ConsumeTrade: %v", err)
+				return nil, fmt.Errorf("consume trade: %w", err)
 			}
 			err = book.orderbookService.ConsumeTrade(ctx, trade)
 			if err != nil {
-				book.log.Error("orderbookService", "ConsumeTrade: %v", err)
-			}
-
-			err = book.orders.UpdateOrder(ctx, matchedOrder.Order)
-			if err != nil {
-				book.log.Error("book", "UpdateOrder: %v", err)
+				return nil, fmt.Errorf("consume orderbook trade: %w", err)
 			}
 
 			response.MatchedOrders = append(response.MatchedOrders, &models.MatchedOrderResult{
@@ -160,9 +176,10 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 			trades = append(trades, trade)
 		} else {
 			// частично заполнили ордер
+			originalMakerOrder := *matchedOrder.Order
 			err = book.ChangeOrder(ctx, matchedOrder.Order, matchedOrder.MatchedAmount)
 			if err != nil {
-				book.log.Error("book", "ChangeOrder: %v", err)
+				return nil, fmt.Errorf("change partially matched maker order: %w", err)
 			}
 
 			orderUpdate := &models.OrderUpdate{
@@ -191,7 +208,13 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 
 			err = book.orders.UpdateOrder(ctx, matchedOrder.Order)
 			if err != nil {
-				book.log.Error("book", "UpdateOrder: %v", err)
+				rollbackErr := book.ChangeOrder(ctx, &originalMakerOrder, matchedOrder.MatchedAmount.Neg())
+				*matchedOrder.Order = originalMakerOrder
+				if rollbackErr != nil {
+					return nil, fmt.Errorf("update partially matched maker order: %w; rollback partially matched maker order: %v", err, rollbackErr)
+				}
+
+				return nil, fmt.Errorf("update partially matched maker order: %w", err)
 			}
 
 			response.MatchedOrders = append(response.MatchedOrders, &models.MatchedOrderResult{
@@ -200,12 +223,12 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 			})
 
 			if err = book.trades.ConsumeTrade(ctx, trade); err != nil {
-				book.log.Error("tradeService", "ConsumeTrade: %v", err)
+				return nil, fmt.Errorf("consume trade: %w", err)
 			}
 
 			err := book.orderbookService.ConsumeTrade(ctx, trade)
 			if err != nil {
-				book.log.Error("orderbookService", "ConsumeTrade: %v", err)
+				return nil, fmt.Errorf("consume orderbook trade: %w", err)
 			}
 
 			trades = append(trades, trade)
@@ -221,22 +244,25 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) *mod
 
 		err := book.orders.UpdateOrder(ctx, takerOrder)
 		if err != nil {
-			book.log.Error("orders", "UpdateOrder: %v", err)
+			return nil, fmt.Errorf("update taker order: %w", err)
 		}
 
 		response.InitialOrder = takerOrder
 
-		market, _ := book.markets.GetMarketByID(book.market.String())
+		market, err := book.markets.GetMarketByID(book.market.String())
+		if err != nil {
+			return nil, fmt.Errorf("get market: %w", err)
+		}
 		if market != nil {
 			market.LastSpotPrice = lastPrice
 			err = book.markets.UpdateMarket(market)
 			if err != nil {
-				book.log.Error("book", "UpdateMarket: %v", err)
+				return nil, fmt.Errorf("update market: %w", err)
 			}
 		}
 	}
 
-	return response
+	return response, nil
 }
 
 func checkLimitPrice(takerOrder *models.Order, price decimal.Decimal) bool {

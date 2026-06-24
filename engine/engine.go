@@ -3,13 +3,15 @@ package engine
 import (
 	"context"
 	"fmt"
-	"github.com/orchidknight/matching-engine/models"
 	"sync"
+
+	"github.com/orchidknight/matching-engine/models"
 )
 
 type Engine struct {
 	marketHandlers          map[models.Symbol]*MarketHandler
 	outcomingOrderResponses chan *models.OrderResponse
+	ctx                     context.Context
 
 	markets   models.MarketService
 	orders    models.OrderService
@@ -28,10 +30,15 @@ func NewEngine(
 	orderbookService models.OrderbookService,
 	log models.Logger,
 ) (*Engine, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	var err error
 	engine := &Engine{
 		marketHandlers:          make(map[models.Symbol]*MarketHandler),
 		outcomingOrderResponses: make(chan *models.OrderResponse, 10000),
+		ctx:                     ctx,
 		markets:                 markets,
 		trades:                  trades,
 		orderbook:               orderbookService,
@@ -109,7 +116,6 @@ func (e *Engine) getMarketHandler(id models.Symbol) (*MarketHandler, bool) {
 }
 
 func (e *Engine) GetLastOrderResponse() *models.OrderResponse {
-	fmt.Println("GetLastOrderResponse")
 	resp := <-e.outcomingOrderResponses
 
 	return resp
@@ -159,19 +165,35 @@ func (e *Engine) Run(ctx context.Context) error {
 	return firstErr
 }
 
+func (e *Engine) sendOrderResponse(ctx context.Context, response *models.OrderResponse) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	select {
+	case e.outcomingOrderResponses <- response:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (e *Engine) ConsumeOrder(order *models.Order) {
 	e.logger.Debug("RECEIVED", "Incoming: %v", order)
 
 	e.lock.RLock()
-	defer e.lock.RUnlock()
-
 	mh, ok := e.marketHandlers[order.Symbol]
+	e.lock.RUnlock()
+
 	if !ok {
 		order.Reject(models.RejectReasonWrongSymbol)
 
-		e.outcomingOrderResponses <- &models.OrderResponse{
+		err := e.sendOrderResponse(e.ctx, &models.OrderResponse{
 			Symbol:       order.Symbol,
 			InitialOrder: order,
+		})
+		if err != nil {
+			e.logger.Error("engine", "sendOrderResponse: %v", err)
 		}
 
 		return

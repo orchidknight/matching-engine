@@ -151,7 +151,7 @@ func (book *Orderbook) RemoveOrder(order *models.Order) error {
 
 	err = price.RemoveOrder(order.ID)
 	if err != nil {
-		fmt.Printf("Error remove orderiD: %v", order.ID)
+		book.log.Error("book", "RemoveOrder: %v", err)
 
 		return err
 	}

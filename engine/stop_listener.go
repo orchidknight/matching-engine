@@ -90,7 +90,11 @@ func (sl *StopOrderListener) processTriggeredOrders(ctx context.Context, trigger
 		}
 
 		sl.log.Debug("sol", "Sent triggered stop order to engine: %v", dbOrder)
-		sl.outcomeOrderChan <- dbOrder
+		select {
+		case sl.outcomeOrderChan <- dbOrder:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 

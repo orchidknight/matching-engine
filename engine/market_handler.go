@@ -132,9 +132,12 @@ func (mh *MarketHandler) processCancel(ctx context.Context, o *models.Order) err
 		return err
 	}
 
-	mh.engine.outcomingOrderResponses <- &models.OrderResponse{
+	err = mh.engine.sendOrderResponse(ctx, &models.OrderResponse{
 		Symbol:       o.Symbol,
 		InitialOrder: order,
+	})
+	if err != nil {
+		return fmt.Errorf("send order response: %w", err)
 	}
 
 	mh.logger.Debug("engine", "Canceled: %s", order.ID.String())
@@ -172,9 +175,12 @@ func (mh *MarketHandler) processStopOrder(ctx context.Context, order *models.Ord
 			mh.logger.Error("orders", "UpdateOrder: %v", err)
 		}
 
-		mh.engine.outcomingOrderResponses <- &models.OrderResponse{
+		err = mh.engine.sendOrderResponse(ctx, &models.OrderResponse{
 			Symbol:       order.Symbol,
 			InitialOrder: order,
+		})
+		if err != nil {
+			return fmt.Errorf("send order response: %w", err)
 		}
 
 		return nil
@@ -208,9 +214,12 @@ func (mh *MarketHandler) processToOrderbook(ctx context.Context, o *models.Order
 		mh.logger.Error("orders", "UpdateOrder: %v", err)
 	}
 
-	mh.engine.outcomingOrderResponses <- &models.OrderResponse{
+	err = mh.engine.sendOrderResponse(ctx, &models.OrderResponse{
 		Symbol:       o.Symbol,
 		InitialOrder: o,
+	})
+	if err != nil {
+		return fmt.Errorf("send order response: %w", err)
 	}
 
 	return nil
@@ -330,9 +339,12 @@ func (mh *MarketHandler) rejectOrder(ctx context.Context, order *models.Order, r
 		return err
 	}
 
-	mh.engine.outcomingOrderResponses <- &models.OrderResponse{
+	err = mh.engine.sendOrderResponse(ctx, &models.OrderResponse{
 		Symbol:       order.Symbol,
 		InitialOrder: order,
+	})
+	if err != nil {
+		return fmt.Errorf("send order response: %w", err)
 	}
 
 	mh.logger.Debug("engine", "Order <%s> has been rejected: %s", order.ID.String(), reason)
@@ -430,10 +442,16 @@ func orderHasLimitPrice(order *models.Order) bool {
 
 func (mh *MarketHandler) processToMatch(ctx context.Context, order *models.Order) error {
 	if mh.orderbook.EnoughLiquidity(order) {
-		result := mh.orderbook.Match(ctx, order)
+		result, err := mh.orderbook.Match(ctx, order)
+		if err != nil {
+			return fmt.Errorf("orderbook.Match: %w", err)
+		}
 		mh.logger.Debug("engine", "MatchResult: %s", result.String())
 
-		mh.engine.outcomingOrderResponses <- result
+		err = mh.engine.sendOrderResponse(ctx, result)
+		if err != nil {
+			return fmt.Errorf("send order response: %w", err)
+		}
 
 		return nil
 	}

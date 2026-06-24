@@ -14,12 +14,14 @@ import (
 )
 
 func TestEngine_ConsumeOrder(t *testing.T) {
-	tests := map[string]struct {
+	tests := []struct {
+		name              string
 		inputOrder        *models.Order
 		wantOrderResponse *models.OrderResponse
 		wantErr           any
 	}{
-		"wrong symbol": {
+		{
+			name: "wrong symbol",
 			inputOrder: &models.Order{
 				ID:             uuid.New(),
 				Account:        "user",
@@ -42,7 +44,8 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 				},
 			},
 		},
-		"added to orderbook": {
+		{
+			name: "added to orderbook",
 			inputOrder: &models.Order{
 				ID:              uuid.New(),
 				Account:         "user",
@@ -66,7 +69,8 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 				},
 			},
 		},
-		"added to stop listener": {
+		{
+			name: "added to stop listener",
 			inputOrder: &models.Order{
 				ID:              uuid.New(),
 				Account:         "user",
@@ -93,7 +97,8 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 				},
 			},
 		},
-		"not enough liquidity": {
+		{
+			name: "not enough liquidity",
 			inputOrder: &models.Order{
 				ID:             uuid.New(),
 				Account:        "user",
@@ -123,37 +128,98 @@ func TestEngine_ConsumeOrder(t *testing.T) {
 		//"matched aggressive limit order":                        {},
 	}
 
-	ctx := context.Background()
-	logger := NewLogMock()
-	markets := NewMarketsMock()
-	orders := NewOrdersMock()
-	trades := NewTradesMock()
-	orderbook := NewOrderbookMock()
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			engine := newRunningTestEngine(t, NewOrdersMock())
+			engine.ConsumeOrder(testCase.inputOrder)
 
-	engine, err := NewEngine(ctx, markets, orders, trades, orderbook, logger)
+			actualOrderResponse := readOrderResponse(t, engine)
+			err := compareOrderResponse(actualOrderResponse, testCase.wantOrderResponse)
+			if err != nil {
+				t.Errorf("order responses do not match: %v;  actual: %v want: %v", err, actualOrderResponse, testCase.wantOrderResponse)
+			}
+		})
+	}
+}
+
+func newRunningTestEngine(t *testing.T, orders models.OrderService) *Engine {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	engine, err := NewEngine(ctx, NewMarketsMock(), orders, NewTradesMock(), NewOrderbookMock(), NewLogMock())
 	if err != nil {
+		cancel()
 		t.Fatal("can't initialize engine", err.Error())
 	}
 
+	runErr := make(chan error, 1)
 	go func() {
-		if err := engine.Run(ctx); err != nil {
-			t.Errorf("engine.Run() error = %v", err)
-		}
+		runErr <- engine.Run(ctx)
 	}()
 
-	time.Sleep(2 * time.Second)
+	t.Cleanup(func() {
+		cancel()
 
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			engine.ConsumeOrder(tc.inputOrder)
-
-			actualOrderResponse := engine.GetLastOrderResponse()
-			fmt.Println("actual result: ", actualOrderResponse)
-			err := compareOrderResponse(actualOrderResponse, tc.wantOrderResponse)
+		select {
+		case err := <-runErr:
 			if err != nil {
-				t.Errorf("order responses do not match: %v;  actual: %v want: %v", err, actualOrderResponse, tc.wantOrderResponse)
+				t.Errorf("engine.Run() error = %v", err)
 			}
-		})
+		case <-time.After(time.Second):
+			t.Error("engine.Run() did not stop after context cancellation")
+		}
+	})
+
+	return engine
+}
+
+func TestEngineRunStopsWhenResponseChannelIsFullAndContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	orders := &notifyingOrderService{
+		updated: make(chan struct{}, 1),
+	}
+	engine, err := NewEngine(ctx, NewMarketsMock(), orders, NewTradesMock(), NewOrderbookMock(), NewLogMock())
+	if err != nil {
+		t.Fatalf("NewEngine() error = %v", err)
+	}
+
+	for len(engine.outcomingOrderResponses) < cap(engine.outcomingOrderResponses) {
+		engine.outcomingOrderResponses <- &models.OrderResponse{}
+	}
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- engine.Run(ctx)
+	}()
+
+	engine.ConsumeOrder(&models.Order{
+		ID:              uuid.New(),
+		Account:         "user",
+		Symbol:          "BTC-USDT",
+		Type:            models.OrderTypeLimit,
+		Status:          models.OrderStatusNew,
+		Side:            models.Buy,
+		AvailableAmount: decimal.NewFromInt(1),
+		Price:           decimal.NewFromInt(100000),
+	})
+
+	select {
+	case <-orders.updated:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for order update before blocked response send")
+	}
+
+	cancel()
+
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Engine.Run() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Engine.Run() did not stop after context cancellation")
 	}
 }
 
@@ -231,6 +297,20 @@ func (*OrderServiceMock) GetOrdersByPair(context.Context, string) ([]*models.Ord
 }
 
 func (*OrderServiceMock) Reject(context.Context, *models.Order) error {
+	return nil
+}
+
+type notifyingOrderService struct {
+	OrderServiceMock
+	updated chan struct{}
+}
+
+func (service *notifyingOrderService) UpdateOrder(context.Context, *models.Order) error {
+	select {
+	case service.updated <- struct{}{}:
+	default:
+	}
+
 	return nil
 }
 
