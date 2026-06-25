@@ -64,13 +64,16 @@ func (book *Orderbook) Match(ctx context.Context, takerOrder *models.Order) (*mo
 			return response, nil
 		}
 
+		// IOC semantics: a market/stop-market order never rests. Any uncovered
+		// remainder is canceled, not left in available under a Completed status.
 		orderUpdate := &models.OrderUpdate{
 			ID:              takerOrder.ID,
 			Status:          models.OrderStatusCompleted,
-			AvailableAmount: result.AmountLeft,
-			AvailableTotal:  result.TotalLeft,
+			AvailableAmount: Zero,
+			AvailableTotal:  Zero,
 			ExecutedAmount:  result.AmountDone,
-			CanceledAmount:  Zero,
+			CanceledAmount:  result.AmountLeft,
+			CanceledTotal:   result.TotalLeft,
 			ExecutedTotal:   result.TotalDone,
 		}
 		takerOrder.ApplyUpdate(orderUpdate)
@@ -389,6 +392,11 @@ func (book *Orderbook) MatchOrderWithTotal(takerOrder *models.Order) *MatchResul
 	matchedTotal := Zero
 	matchedAmount := Zero
 	leftTotal := takerOrder.AvailableTotal
+	// remainder holds quote dust left on the last partial fill: the taker offered
+	// leftTotal but the floored base amount only costs floored*price, so
+	// leftTotal-floored*price cannot buy a whole base lot. It is returned to the
+	// taker via TotalLeft rather than booked as executed.
+	remainder := Zero
 
 	iteratorFunc := func(i llrb.Item) bool {
 		pl := i.(*PriceNode)
@@ -425,7 +433,9 @@ func (book *Orderbook) MatchOrderWithTotal(takerOrder *models.Order) *MatchResul
 				} else {
 					matchedItem.MatchedAmount = book.divFloor(leftTotal, makerOrder.Price)
 					matchedItem.IsDone = false
-					matchedTotal = matchedTotal.Add(leftTotal)
+					matched := matchedItem.MatchedAmount.Mul(makerOrder.Price)
+					matchedTotal = matchedTotal.Add(matched)
+					remainder = leftTotal.Sub(matched)
 					leftTotal = Zero
 					matchedAmount = matchedAmount.Add(matchedItem.MatchedAmount)
 				}
@@ -439,8 +449,10 @@ func (book *Orderbook) MatchOrderWithTotal(takerOrder *models.Order) *MatchResul
 				} else {
 					matchedItem.MatchedAmount = book.divFloor(leftTotal, makerOrder.Price)
 					matchedItem.IsDone = false
+					matched := matchedItem.MatchedAmount.Mul(makerOrder.Price)
+					matchedTotal = matchedTotal.Add(matched)
+					remainder = leftTotal.Sub(matched)
 					leftTotal = Zero
-					matchedTotal = matchedTotal.Add(matchedItem.MatchedAmount.Mul(makerOrder.Price))
 					matchedAmount = matchedAmount.Add(matchedItem.MatchedAmount)
 				}
 			default:
@@ -465,7 +477,7 @@ func (book *Orderbook) MatchOrderWithTotal(takerOrder *models.Order) *MatchResul
 		MatchedOrders: matchedResult,
 		Order:         takerOrder,
 		IsDone:        isDone,
-		TotalLeft:     leftTotal,
+		TotalLeft:     leftTotal.Add(remainder),
 		TotalDone:     matchedTotal,
 		AmountDone:    matchedAmount,
 	}

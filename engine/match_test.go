@@ -274,6 +274,52 @@ func TestMatchOrderWithTotalFloorsAmountToBaseScale(t *testing.T) {
 	requireRawMatchedOrder(t, result.MatchedOrders, 0, maker, decimal.RequireFromString("3.33"))
 }
 
+// TestMatchOrderWithTotalReturnsUnspendableQuoteDust checks that a partial fill
+// by total books only the quote actually traded (floored amount * price) and
+// returns the un-spendable dust via TotalLeft — identically for buy and sell.
+// 10 quote / price 3 = 3.3333…; floored to baseScale (2dp) = 3.33, trading
+// 3.33*3 = 9.99 quote, leaving 0.01 that cannot buy a whole base lot.
+func TestMatchOrderWithTotalReturnsUnspendableQuoteDust(t *testing.T) {
+	tests := []struct {
+		name      string
+		takerSide models.Side
+		makerSide models.Side
+	}{
+		{name: "buy", takerSide: models.Buy, makerSide: models.Sell},
+		{name: "sell", takerSide: models.Sell, makerSide: models.Buy},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testBook := newTestOrderbook()
+			testBook.baseScale = 2
+
+			maker := newRestingOrder(tt.makerSide, decimal.NewFromInt(5))
+			maker.Price = decimal.NewFromInt(3)
+			if err := testBook.InsertOrder(maker); err != nil {
+				t.Fatalf("InsertOrder() error = %v", err)
+			}
+
+			taker := &models.Order{
+				ID:             uuid.New(),
+				Account:        "taker",
+				Symbol:         "BTC-USDT",
+				Type:           models.OrderTypeMarket,
+				Status:         models.OrderStatusNew,
+				Side:           tt.takerSide,
+				AvailableTotal: decimal.NewFromInt(10),
+			}
+
+			result := testBook.MatchOrderWithTotal(taker)
+
+			requireDecimalEqual(t, "amount done", result.AmountDone, decimal.RequireFromString("3.33"))
+			requireDecimalEqual(t, "total done", result.TotalDone, decimal.RequireFromString("9.99"))
+			requireDecimalEqual(t, "total left", result.TotalLeft, decimal.RequireFromString("0.01"))
+			requireDecimalEqual(t, "total done == amount*price", result.TotalDone, result.AmountDone.Mul(maker.Price))
+		})
+	}
+}
+
 func TestMatchMarketableLimitWithOnlySelfLiquidityRestsOrder(t *testing.T) {
 	testBook := newTestOrderbook()
 	restingAsk := newRestingOrder(models.Sell, decimal.NewFromInt(5))
@@ -350,6 +396,111 @@ func TestMatchRollsBackRestingTakerWhenPersistFails(t *testing.T) {
 			t.Fatalf("taker order %s remains in bids after persistence failure", takerOrder.ID)
 		}
 	}
+}
+
+// TestMatchMarketByTotalMovesUncoveredRemainderToCanceled verifies IOC accounting:
+// a market order sized by quote-total that out-sizes book liquidity completes with
+// AvailableTotal zeroed and the unspent quote booked as CanceledTotal, instead of
+// dangling in available under a Completed status.
+func TestMatchMarketByTotalMovesUncoveredRemainderToCanceled(t *testing.T) {
+	testBook := newTestOrderbook()
+	maker := newRestingOrder(models.Sell, decimal.NewFromInt(2))
+	maker.Price = decimal.NewFromInt(100)
+	if err := testBook.InsertOrder(maker); err != nil {
+		t.Fatalf("InsertOrder() error = %v", err)
+	}
+
+	taker := newMarketOrder(models.Buy, decimal.Zero)
+	taker.OriginalTotal = decimal.NewFromInt(500)
+	taker.AvailableTotal = decimal.NewFromInt(500)
+
+	response, err := testBook.Match(context.Background(), taker)
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
+
+	initial := response.InitialOrder
+	if initial == nil {
+		t.Fatal("Match().InitialOrder is nil")
+	}
+	if initial.Status != models.OrderStatusCompleted {
+		t.Fatalf("status = %s, want %s", initial.Status, models.OrderStatusCompleted)
+	}
+	requireDecimalEqual(t, "AvailableTotal", initial.AvailableTotal, decimal.Zero)
+	requireDecimalEqual(t, "AvailableAmount", initial.AvailableAmount, decimal.Zero)
+	requireDecimalEqual(t, "ExecutedTotal", initial.ExecutedTotal, decimal.NewFromInt(200))
+	requireDecimalEqual(t, "ExecutedAmount", initial.ExecutedAmount, decimal.NewFromInt(2))
+	requireDecimalEqual(t, "CanceledTotal", initial.CanceledTotal, decimal.NewFromInt(300))
+	requireDecimalEqual(t, "CanceledAmount", initial.CanceledAmount, decimal.Zero)
+	// IOC invariant: Original = Executed + Canceled (+ Available, now 0).
+	requireDecimalEqual(t, "total invariant", initial.ExecutedTotal.Add(initial.CanceledTotal), initial.OriginalTotal)
+}
+
+// TestMatchStopMarketByAmountMovesUncoveredRemainderToCanceled covers the same
+// IOC accounting for an amount-sized stop-market order (which bypasses the
+// EnoughLiquidity guard and so can reach Match with an uncovered remainder).
+func TestMatchStopMarketByAmountMovesUncoveredRemainderToCanceled(t *testing.T) {
+	testBook := newTestOrderbook()
+	maker := newRestingOrder(models.Sell, decimal.NewFromInt(2))
+	maker.Price = decimal.NewFromInt(100)
+	if err := testBook.InsertOrder(maker); err != nil {
+		t.Fatalf("InsertOrder() error = %v", err)
+	}
+
+	taker := newMarketOrder(models.Buy, decimal.NewFromInt(5))
+	taker.Type = models.OrderTypeStopMarket
+	taker.OriginalAmount = decimal.NewFromInt(5)
+
+	response, err := testBook.Match(context.Background(), taker)
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
+
+	initial := response.InitialOrder
+	if initial == nil {
+		t.Fatal("Match().InitialOrder is nil")
+	}
+	if initial.Status != models.OrderStatusCompleted {
+		t.Fatalf("status = %s, want %s", initial.Status, models.OrderStatusCompleted)
+	}
+	requireDecimalEqual(t, "AvailableAmount", initial.AvailableAmount, decimal.Zero)
+	requireDecimalEqual(t, "ExecutedAmount", initial.ExecutedAmount, decimal.NewFromInt(2))
+	requireDecimalEqual(t, "ExecutedTotal", initial.ExecutedTotal, decimal.NewFromInt(200))
+	requireDecimalEqual(t, "CanceledAmount", initial.CanceledAmount, decimal.NewFromInt(3))
+	requireDecimalEqual(t, "CanceledTotal", initial.CanceledTotal, decimal.Zero)
+	// IOC invariant: Original = Executed + Canceled (+ Available, now 0).
+	requireDecimalEqual(t, "amount invariant", initial.ExecutedAmount.Add(initial.CanceledAmount), initial.OriginalAmount)
+}
+
+// TestMatchFullyFilledMarketLeavesNoCanceled guards the happy path: a market
+// order that fully fills must not book any canceled remainder.
+func TestMatchFullyFilledMarketLeavesNoCanceled(t *testing.T) {
+	testBook := newTestOrderbook()
+	maker := newRestingOrder(models.Sell, decimal.NewFromInt(5))
+	maker.Price = decimal.NewFromInt(100)
+	if err := testBook.InsertOrder(maker); err != nil {
+		t.Fatalf("InsertOrder() error = %v", err)
+	}
+
+	taker := newMarketOrder(models.Buy, decimal.NewFromInt(5))
+	taker.OriginalAmount = decimal.NewFromInt(5)
+
+	response, err := testBook.Match(context.Background(), taker)
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
+
+	initial := response.InitialOrder
+	if initial == nil {
+		t.Fatal("Match().InitialOrder is nil")
+	}
+	if initial.Status != models.OrderStatusCompleted {
+		t.Fatalf("status = %s, want %s", initial.Status, models.OrderStatusCompleted)
+	}
+	requireDecimalEqual(t, "AvailableAmount", initial.AvailableAmount, decimal.Zero)
+	requireDecimalEqual(t, "ExecutedAmount", initial.ExecutedAmount, decimal.NewFromInt(5))
+	requireDecimalEqual(t, "CanceledAmount", initial.CanceledAmount, decimal.Zero)
+	requireDecimalEqual(t, "CanceledTotal", initial.CanceledTotal, decimal.Zero)
 }
 
 func newLimitOrder(side models.Side, amount decimal.Decimal, price decimal.Decimal) *models.Order {
