@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -68,10 +69,16 @@ func TestMarketHandlerProcessOrderRejectsInvalidMarketInput(t *testing.T) {
 func newValidationMarketHandler(t *testing.T) *MarketHandler {
 	t.Helper()
 
+	return newValidationMarketHandlerWithOrders(t, newRecordingOrderService())
+}
+
+func newValidationMarketHandlerWithOrders(t *testing.T, orders models.OrderService) *MarketHandler {
+	t.Helper()
+
 	engine, err := NewEngine(
 		context.Background(),
 		nil,
-		newRecordingOrderService(),
+		orders,
 		&staticTradeService{lastPrice: decimal.NewFromInt(100)},
 		NewOrderbookMock(),
 		NewLogMock(),
@@ -242,6 +249,43 @@ func TestMarketHandlerProcessCancelRemoveOrderError(t *testing.T) {
 	}
 	if err := marketHandler.ProcessOrder(context.Background(), cancel); err == nil {
 		t.Fatal("ProcessOrder() error = nil, want RemoveOrder error")
+	}
+}
+
+// TestMarketHandlerProcessStopOrderRollsBackOnPersistFailure verifies that a new
+// stop order is not left as a ghost in the stop listener when persistence fails:
+// the listener insert is rolled back and the error is surfaced to the caller,
+// keeping in-memory state and storage consistent (mirrors the rollbacks in Match).
+func TestMarketHandlerProcessStopOrderRollsBackOnPersistFailure(t *testing.T) {
+	orders := &failingOrderService{updateErr: errors.New("persist failed")}
+	marketHandler := newValidationMarketHandlerWithOrders(t, orders)
+
+	stopOrder := &models.Order{
+		ID:              uuid.New(),
+		Account:         "user",
+		Symbol:          "BTC-USDT",
+		Type:            models.OrderTypeStopLimit,
+		Status:          models.OrderStatusNew,
+		Side:            models.Buy,
+		AvailableAmount: decimal.NewFromInt(1),
+		Price:           decimal.NewFromInt(80),
+		ActivationPrice: decimal.NewFromInt(90),
+	}
+
+	err := marketHandler.ProcessOrder(context.Background(), stopOrder)
+	if err == nil {
+		t.Fatal("ProcessOrder() error = nil, want persist error surfaced to caller")
+	}
+
+	// LastPrice (100) > ActivationPrice (90) => the order would rest in the lessTree;
+	// after rollback it must be gone, leaving no ghost without a storage record.
+	stopListener := marketHandler.stopListener.(*StopOrderListener)
+	lessOrders, listErr := stopListener.LessOrders(decimal.NewFromInt(90))
+	if listErr != nil {
+		t.Fatalf("LessOrders() error = %v", listErr)
+	}
+	if len(lessOrders) != 0 {
+		t.Fatalf("stop listener holds %d ghost orders after persist failure, want 0", len(lessOrders))
 	}
 }
 

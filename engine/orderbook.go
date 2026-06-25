@@ -45,8 +45,8 @@ func NewOrderbook(market models.Symbol, baseScale int32, service models.Orderboo
 		lock:             sync.RWMutex{},
 		orderbookService: service,
 		log:              log,
-		asksVolume:       decimal.NewFromUint64(0),
-		bidsVolume:       decimal.NewFromUint64(0),
+		asksVolume:       Zero,
+		bidsVolume:       Zero,
 		orders:           o,
 		markets:          m,
 		trades:           t,
@@ -122,10 +122,7 @@ func (book *Orderbook) ChangeOrder(_ context.Context, order *models.Order, chang
 		return err
 	}
 	book.changeVolume(order.Side, price.totalAmount.Sub(previousAmount))
-	if price.Len() <= 0 {
-		tree.Delete(price)
-	}
-	if price.totalAmount.LessThanOrEqual(decimal.NewFromUint64(0)) {
+	if price.Len() <= 0 || price.totalAmount.LessThanOrEqual(Zero) {
 		tree.Delete(price)
 	}
 
@@ -164,10 +161,7 @@ func (book *Orderbook) RemoveOrder(order *models.Order) error {
 	}
 	book.changeVolume(order.Side, price.totalAmount.Sub(previousAmount))
 
-	if price.Len() <= 0 {
-		tree.Delete(price)
-	}
-	if price.totalAmount.LessThanOrEqual(decimal.NewFromUint64(0)) {
+	if price.Len() <= 0 || price.totalAmount.LessThanOrEqual(Zero) {
 		tree.Delete(price)
 	}
 
@@ -181,9 +175,9 @@ func (book *Orderbook) Snapshot() models.Snapshot {
 	bids := make([][2]decimal.Decimal, 0)
 	asks := make([][2]decimal.Decimal, 0)
 
-	book.asksTree.AscendGreaterOrEqual(newPriceNode(decimal.NewFromUint64(0)), func(i llrb.Item) bool {
+	book.asksTree.AscendGreaterOrEqual(newPriceNode(Zero), func(i llrb.Item) bool {
 		pl := i.(*PriceNode)
-		if pl.price.Equal(decimal.NewFromUint64(0)) {
+		if pl.price.Equal(Zero) {
 			return true
 		}
 		asks = append(asks, [2]decimal.Decimal{pl.price, pl.totalAmount})
@@ -193,7 +187,7 @@ func (book *Orderbook) Snapshot() models.Snapshot {
 
 	book.bidsTree.DescendLessOrEqual(newPriceNode(decimal.NewFromUint64(math.MaxUint64)), func(i llrb.Item) bool {
 		pl := i.(*PriceNode)
-		if pl.price.Equal(decimal.NewFromUint64(0)) {
+		if pl.price.Equal(Zero) {
 			return true
 		}
 		bids = append(bids, [2]decimal.Decimal{pl.price, pl.totalAmount})
@@ -248,6 +242,13 @@ func (book *Orderbook) CanMatchImmediately(order *models.Order) bool {
 }
 
 func (book *Orderbook) EnoughLiquidity(order *models.Order) bool {
+	// The liquidity guard intentionally covers only a fresh OrderTypeMarket order.
+	// A triggered StopMarket is deliberately excluded: a stop is a risk-management
+	// instrument, so once it fires it must execute immediately as IOC — filling
+	// whatever depth exists and canceling the uncovered remainder (see Match and
+	// RF2-03) — rather than being rejected up front and leaving the position
+	// unprotected. Keep this asymmetry in sync with the market/stop-market branch
+	// in Match.
 	if order.Type != models.OrderTypeMarket {
 		return true
 	}
@@ -283,7 +284,7 @@ func (book *Orderbook) MinAsk() decimal.Decimal {
 		return minItem.(*PriceNode).price
 	}
 
-	return decimal.NewFromUint64(0)
+	return Zero
 }
 
 func (book *Orderbook) GetOrder(id uuid.UUID, side string, price decimal.Decimal) (models.Order, bool) {
@@ -315,5 +316,5 @@ func (book *Orderbook) MaxBid() decimal.Decimal {
 		return maxItem.(*PriceNode).price
 	}
 
-	return decimal.NewFromUint64(0)
+	return Zero
 }

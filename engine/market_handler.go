@@ -146,6 +146,7 @@ func (mh *MarketHandler) processStopOrder(ctx context.Context, order *models.Ord
 
 			return err
 		}
+		originalOrder := *order
 		orderUpdate := &models.OrderUpdate{
 			ID:              order.ID,
 			Status:          models.OrderStatusPendingTriggerPrice,
@@ -159,7 +160,13 @@ func (mh *MarketHandler) processStopOrder(ctx context.Context, order *models.Ord
 
 		err = mh.engine.orders.UpdateOrder(ctx, order)
 		if err != nil {
-			mh.logger.Error("orders", "UpdateOrder: %v", err)
+			rollbackErr := mh.stopListener.RemoveOrder(order)
+			*order = originalOrder
+			if rollbackErr != nil {
+				return fmt.Errorf("persist new stop order: %w; rollback stop listener insert: %v", err, rollbackErr)
+			}
+
+			return fmt.Errorf("persist new stop order: %w", err)
 		}
 
 		err = mh.engine.sendOrderResponse(ctx, &models.OrderResponse{

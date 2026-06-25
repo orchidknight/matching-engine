@@ -20,7 +20,7 @@ type PriceNode struct {
 func newPriceNode(price decimal.Decimal) *PriceNode {
 	return &PriceNode{
 		price:       price,
-		totalAmount: decimal.NewFromUint64(0),
+		totalAmount: Zero,
 		orderMap:    ordered_map.NewOrderedMap(),
 	}
 }

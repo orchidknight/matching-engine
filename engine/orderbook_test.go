@@ -67,6 +67,41 @@ func TestOrderbookEnoughLiquidityUsesInsertedVolume(t *testing.T) {
 	}
 }
 
+// TestOrderbookEnoughLiquidityAllowsTriggeredStopMarket locks in the deliberate
+// asymmetry of the guard (RF2-04): a (triggered) stop-market is never gated by
+// liquidity, even when its size exceeds book depth. Such an order must reach
+// Match and execute as IOC — partial fill plus canceled remainder (see RF2-03,
+// TestMatchStopMarketByAmountMovesUncoveredRemainderToCanceled) — rather than be
+// rejected up front, which would leave a stop-loss position unprotected.
+func TestOrderbookEnoughLiquidityAllowsTriggeredStopMarket(t *testing.T) {
+	tests := map[string]struct {
+		makerSide models.Side
+		takerSide models.Side
+	}{
+		"stop-market buy past ask depth":  {makerSide: models.Sell, takerSide: models.Buy},
+		"stop-market sell past bid depth": {makerSide: models.Buy, takerSide: models.Sell},
+	}
+
+	for testName, testCase := range tests {
+		t.Run(testName, func(t *testing.T) {
+			testBook := newTestOrderbook()
+			makerOrder := newRestingOrder(testCase.makerSide, decimal.NewFromInt(2))
+			if err := testBook.InsertOrder(makerOrder); err != nil {
+				t.Fatalf("InsertOrder() error = %v", err)
+			}
+
+			// Amount (5) deliberately out-sizes book depth (2).
+			takerOrder := newMarketOrder(testCase.takerSide, decimal.NewFromInt(5))
+			takerOrder.Type = models.OrderTypeStopMarket
+			takerOrder.Status = models.OrderStatusTriggered
+
+			if !testBook.EnoughLiquidity(takerOrder) {
+				t.Fatal("EnoughLiquidity() = false, want true: stop-market must bypass the guard")
+			}
+		})
+	}
+}
+
 func TestOrderbookSnapshotConcurrentAccess(t *testing.T) {
 	testBook := newTestOrderbook()
 	start := make(chan struct{})
