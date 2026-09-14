@@ -1,3 +1,5 @@
+[![CI](https://github.com/orchidknight/matching-engine/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/orchidknight/matching-engine/actions/workflows/ci.yml)
+
 # matching-engine
 
 `matching-engine` is an embeddable Go library for matching exchange orders. It is a core domain package, not a standalone service: the host application owns persistence, transport, authentication, market data, and event delivery.
